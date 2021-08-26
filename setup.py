@@ -43,7 +43,7 @@ def _parse_requirements(path):
 
 
 setup(
-    name='clrs',
+    name='dm-clrs',
     version=_get_version(),
     url='https://github.com/deepmind/clrs',
     license='Apache 2.0',
