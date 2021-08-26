@@ -34,7 +34,7 @@ from clrs._src.specs import SPECS
 from clrs._src.specs import Stage
 from clrs._src.specs import Type
 
-__version__ = "0.0.1"
+__version__ = "0.0.2"
 
 __all__ = (
     "build_sampler",

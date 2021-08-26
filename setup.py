@@ -48,11 +48,11 @@ setup(
     url='https://github.com/deepmind/clrs',
     license='Apache 2.0',
     author='DeepMind',
-    description=('A library of reinforcement learning building blocks in JAX.'),
+    description=('The CLRS Algorithmic Reasoning Benchmark.'),
     long_description=open(os.path.join(_CURRENT_DIR, 'README.md')).read(),
     long_description_content_type='text/markdown',
     author_email='clrs-dev@google.com',
-    keywords='reinforcement-learning python machine learning',
+    keywords='python machine learning',
     packages=find_namespace_packages(exclude=['*_test.py']),
     install_requires=_parse_requirements(
         os.path.join(_CURRENT_DIR, 'requirements', 'requirements.txt')),
