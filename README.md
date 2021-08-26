@@ -13,7 +13,9 @@ Leiserson, Rivest and Stein.
 The CLRS Algorithmic Reasoning Benchmark can be installed with pip directly from
 GitHub, with the following command:
 
-TODO(budden): Populate.
+```shell
+pip install git+git://github.com/deepmind/clrs.git
+```
 
 ## Getting started
 
