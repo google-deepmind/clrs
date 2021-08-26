@@ -141,7 +141,8 @@ To cite the CLRS Algorithmic Reasoning Benchmark:
 ```latex
 @article{deepmind2021clrs,
   author = {Petar Veli\v{c}kovi\'{c} and Adri\`{a} Puigdom\`{e}nech Badia and
-  David Budden and Razvan Pascanu and Raia Hadsell and Charles Blundell},
+    David Budden and Razvan Pascanu and Andrea Banino and Misha Dashevskiy and
+    Raia Hadsell and Charles Blundell},
   title = {The CLRS Algorithmic Reasoning Benchmark},
   year = {2021},
 }
