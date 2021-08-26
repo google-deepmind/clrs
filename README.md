@@ -17,6 +17,12 @@ GitHub, with the following command:
 pip install git+git://github.com/deepmind/clrs.git
 ```
 
+or from PyPI:
+
+```shell
+pip install dm-clrs
+```
+
 ## Getting started
 
 To set up a Python virtual environment with the required dependencies, run:
