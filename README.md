@@ -63,9 +63,9 @@ trajectories for benchmarking out-of-distribution generalization.
 
 |       | Trajectories | Problem Size |
 |-------|--------------|--------------|
-| Train | 1000         | 20           |
-| Eval  | 32           | 20           |
-| Test  | 32           | 100          |
+| Train | 1000         | 16           |
+| Eval  | 32           | 16           |
+| Test  | 32           | 64           |
 
 
 where "problem size" refers to e.g. the length of an array or number of nodes in
