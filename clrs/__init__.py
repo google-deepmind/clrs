@@ -26,6 +26,7 @@ from clrs._src.samplers import clrs21_train
 from clrs._src.samplers import clrs21_val
 from clrs._src.samplers import Features
 from clrs._src.samplers import Feedback
+from clrs._src.samplers import Sampler
 from clrs._src.samplers import Trajectory
 from clrs._src.specs import Location
 from clrs._src.specs import OutputClass
@@ -48,6 +49,7 @@ __all__ = (
     "Feedback",
     "Location",
     "Model",
+    "Sampler",
     "Spec",
     "SPECS",
     "Stage",
