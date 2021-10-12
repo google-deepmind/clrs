@@ -149,7 +149,8 @@ class Sampler(abc.ABC):
 
     mat = self._rng.binomial(1, p, size=(nb_nodes, nb_nodes))
     if not directed:
-      mat *= np.transpose(mat)
+      mat = np.triu(mat)
+      mat = mat | np.transpose(mat)
     elif acyclic:
       mat = np.triu(mat, k=1)
       p = self._rng.permutation(nb_nodes)  # To allow nontrivial solutions
