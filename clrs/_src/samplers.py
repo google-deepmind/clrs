@@ -493,8 +493,26 @@ class SegmentsSampler(Sampler):
 
   def _sample_data(self, length: int, low: float = 0., high: float = 1.):
     del length  # There are exactly four endpoints.
+
+    # Quick CCW check (ignoring collinearity) for rejection sampling
+    def ccw(x_a, y_a, x_b, y_b, x_c, y_c):
+      return (y_c - y_a) * (x_b - x_a) > (y_b - y_a) * (x_c - x_a)
+    def intersect(xs, ys):
+      return ccw(xs[0], ys[0], xs[2], ys[2], xs[3], ys[3]) != ccw(
+          xs[1], ys[1], xs[2], ys[2], xs[3], ys[3]) and ccw(
+              xs[0], ys[0], xs[1], ys[1], xs[2], ys[2]) != ccw(
+                  xs[0], ys[0], xs[1], ys[1], xs[3], ys[3])
+
+    # Decide (with uniform probability) should this sample intersect
+    coin_flip = self._rng.binomial(1, 0.5)
+
     xs = self._random_sequence(length=4, low=low, high=high)
     ys = self._random_sequence(length=4, low=low, high=high)
+
+    while intersect(xs, ys) != coin_flip:
+      xs = self._random_sequence(length=4, low=low, high=high)
+      ys = self._random_sequence(length=4, low=low, high=high)
+
     return [xs, ys]
 
 
