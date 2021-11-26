@@ -16,6 +16,7 @@
 """The CLRS Algorithmic Reasoning Benchmark."""
 
 from clrs import models
+from clrs._src import algorithms
 from clrs._src.model import evaluate
 from clrs._src.model import Model
 from clrs._src.probing import DataPoint

@@ -17,6 +17,8 @@
 
 import abc
 import collections
+import os
+import pickle as pkl
 import types
 
 from typing import Any, Callable, List, Optional, Tuple
@@ -67,6 +69,7 @@ class Sampler(abc.ABC):
       num_samples: int,
       *args,
       seed: Optional[int] = None,
+      file_name: Optional[str] = None,
       **kwargs,
   ):
     """Initializes a `Sampler`.
@@ -77,6 +80,8 @@ class Sampler(abc.ABC):
       num_samples: Number of algorithm unrolls to sample.
       *args: Algorithm args.
       seed: RNG seed.
+      file_name: file_name where the dataset is stored. If None,
+        the dataset is generated on the fly (slower).
       **kwargs: Algorithm kwargs.
     """
 
@@ -88,9 +93,17 @@ class Sampler(abc.ABC):
     outputs = []
     hints = []
 
-    for _ in range(num_samples):
-      data = self._sample_data(*args, **kwargs)
-      _, probes = algorithm(*data)
+    file_probes = None
+    if file_name is not None:
+      with open(file_name, 'rb') as f:
+        file_probes = pkl.load(f)
+
+    for i in range(num_samples):
+      if file_name is None:
+        data = self._sample_data(*args, **kwargs)
+        _, probes = algorithm(*data)
+      else:
+        probes = file_probes[i]
       inp, outp, hint = probing.split_stages(probes, spec)
       inputs.append(inp)
       outputs.append(outp)
@@ -171,7 +184,12 @@ class Sampler(abc.ABC):
     return mat
 
 
-def clrs21_train(name: str) -> Tuple[Sampler, specs.Spec]:
+def _join_prefix(folder, prefix):
+  return None if folder is None else os.path.join(folder, prefix)
+
+
+def clrs21_train(name: str, folder: Optional[str] = None) -> Tuple[
+    Sampler, specs.Spec]:
   """Builds a CLRS-21 training sampler for algorithm specified by `name`."""
   if name not in specs.CLRS_21_ALGS:
     raise NotImplementedError(f'Algorithm {name} not supported in CLRS-21.')
@@ -180,11 +198,13 @@ def clrs21_train(name: str) -> Tuple[Sampler, specs.Spec]:
       seed=CLRS21['train']['seed'],
       num_samples=CLRS21['train']['num_samples'],
       length=CLRS21['train']['length'],
+      file_name=_join_prefix(folder, 'train_{}.pkl'.format(name)),
   )
   return sampler
 
 
-def clrs21_val(name: str) -> Tuple[Sampler, specs.Spec]:
+def clrs21_val(name: str, folder: Optional[str] = None) -> Tuple[
+    Sampler, specs.Spec]:
   """Builds a CLRS-21 validation sampler for algorithm specified by `name`."""
   if name not in specs.CLRS_21_ALGS:
     raise NotImplementedError(f'Algorithm {name} not supported in CLRS-21.')
@@ -193,11 +213,13 @@ def clrs21_val(name: str) -> Tuple[Sampler, specs.Spec]:
       seed=CLRS21['val']['seed'],
       num_samples=CLRS21['val']['num_samples'],
       length=CLRS21['val']['length'],
+      file_name=_join_prefix(folder, 'val_{}.pkl'.format(name)),
   )
   return sampler
 
 
-def clrs21_test(name: str) -> Tuple[Sampler, specs.Spec]:
+def clrs21_test(name: str, folder: Optional[str] = None) -> Tuple[
+    Sampler, specs.Spec]:
   """Builds a CLRS-21 testing sampler for algorithm specified by `name`."""
   if name not in specs.CLRS_21_ALGS:
     raise NotImplementedError(f'Algorithm {name} not supported in CLRS-21.')
@@ -206,6 +228,7 @@ def clrs21_test(name: str) -> Tuple[Sampler, specs.Spec]:
       seed=CLRS21['test']['seed'],
       num_samples=CLRS21['test']['num_samples'],
       length=CLRS21['test']['length'],
+      file_name=_join_prefix(folder, 'test_{}.pkl'.format(name)),
   )
   return sampler
 
@@ -215,6 +238,7 @@ def build_sampler(
     num_samples: int,
     *args,
     seed: Optional[int] = None,
+    file_name: Optional[str] = None,
     **kwargs,
 ) -> Tuple[Sampler, specs.Spec]:
   """Builds a sampler. See `Sampler` documentation."""
@@ -224,7 +248,8 @@ def build_sampler(
   spec = specs.SPECS[name]
   algorithm = getattr(algorithms, name)
   sampler = SAMPLERS[name](
-      algorithm, spec, num_samples, seed=seed, *args, **kwargs)
+      algorithm, spec, num_samples, seed=seed,
+      file_name=file_name, *args, **kwargs)
   return sampler, spec
 
 
