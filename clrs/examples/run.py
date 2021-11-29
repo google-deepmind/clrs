@@ -47,6 +47,8 @@ flags.DEFINE_enum('processor_type', 'mpnn',
 
 flags.DEFINE_string('checkpoint_path', '/tmp/clrs3',
                     'Path in which checkpoints are saved.')
+flags.DEFINE_string('dataset_path', '/tmp/clrs3',
+                    'Path in which dataset is stored.')
 flags.DEFINE_boolean('freeze_processor', False,
                      'Whether to freeze the processor of the model.')
 
@@ -57,8 +59,9 @@ def main(unused_argv):
   # Use canonical CLRS-21 samplers.
   clrs21_spec = clrs.CLRS21
   logging.info('Using CLRS21 spec: %s', clrs21_spec)
-  train_sampler, spec = clrs.clrs21_train(FLAGS.algorithm)
-  val_sampler, _ = clrs.clrs21_val(FLAGS.algorithm)
+  train_sampler, spec = clrs.clrs21_train(FLAGS.algorithm,
+                                          folder=FLAGS.dataset_path)
+  val_sampler, _ = clrs.clrs21_val(FLAGS.algorithm, folder=FLAGS.dataset_path)
 
   model = clrs.models.BaselineModel(
       spec=spec,
@@ -133,7 +136,7 @@ def main(unused_argv):
         model.save_model('best.pkl')
 
   # Training complete, evaluate on test set.
-  test_sampler, _ = clrs.clrs21_test(FLAGS.algorithm)
+  test_sampler, _ = clrs.clrs21_test(FLAGS.algorithm, folder=FLAGS.dataset_path)
   logging.info('Restoring best model from checkpoint...')
   model.restore_model('best.pkl', only_load_processor=False)
 
