@@ -172,6 +172,41 @@ class Sampler(abc.ABC):
       mat = mat.astype(float) * weights
     return mat
 
+  def _random_community_graph(self, nb_nodes, k=4, p=0.5, eps=0.01,
+                              directed=False, acyclic=False, weighted=False,
+                              low=0.0, high=1.0):
+    """Random perturbed k-community graph."""
+    mat = np.zeros((nb_nodes, nb_nodes))
+    if k > nb_nodes:
+      raise ValueError(f'Cannot generate graph of too many ({k}) communities.')
+    los, his = [], []
+    lo = 0
+    for i in range(k):
+      if i == k - 1:
+        hi = nb_nodes
+      else:
+        hi = lo + nb_nodes // k
+      mat[lo:hi, lo:hi] = self._random_er_graph(
+          hi - lo, p=p, directed=directed,
+          acyclic=acyclic, weighted=weighted,
+          low=low, high=high)
+      los.append(lo)
+      his.append(hi)
+      lo = hi
+    toggle = self._random_er_graph(nb_nodes, p=eps, directed=directed,
+                                   acyclic=acyclic, weighted=weighted,
+                                   low=low, high=high)
+
+    # Prohibit closing new cycles
+    for i in range(k):
+      for j in range(i):
+        toggle[los[i]:his[i], los[j]:his[j]] *= 0
+
+    mat = np.where(toggle > 0.0, (1.0 - (mat > 0.0)) * toggle, mat)
+    p = self._rng.permutation(nb_nodes)  # To allow nontrivial solutions
+    mat = mat[p, :][:, p]
+    return mat
+
   def _random_bipartite_graph(self, n, m, p=0.25):
     """Random bipartite graph-based flow network."""
     nb_nodes = n + m + 2
@@ -403,7 +438,7 @@ class ArticulationSampler(Sampler):
   def _sample_data(
       self,
       length: int,
-      p: float = 0.3,
+      p: float = 0.2,
   ):
     graph = self._random_er_graph(
         nb_nodes=length, p=p, directed=False, acyclic=False, weighted=False)
@@ -473,6 +508,22 @@ class DAGPathSampler(Sampler):
         high=high)
     source_node = self._rng.choice(length)
     return [graph, source_node]
+
+
+class SccSampler(Sampler):
+  """Sampler for strongly connected component (SCC) tasks."""
+
+  def _sample_data(
+      self,
+      length: int,
+      k: int = 4,
+      p: float = 0.5,
+      eps: float = 0.01,
+  ):
+    graph = self._random_community_graph(
+        nb_nodes=length, k=k, p=p, eps=eps,
+        directed=True, acyclic=False, weighted=False)
+    return [graph]
 
 
 class BipartiteSampler(Sampler):
@@ -567,7 +618,7 @@ SAMPLERS = {
     'task_scheduling': TaskSampler,
     'dfs': DfsSampler,
     'topological_sort': TopoSampler,
-    'strongly_connected_components': DfsSampler,
+    'strongly_connected_components': SccSampler,
     'articulation_points': ArticulationSampler,
     'bridges': ArticulationSampler,
     'bfs': BfsSampler,
