@@ -593,11 +593,18 @@ class SegmentsSampler(Sampler):
 
 
 class ConvexHullSampler(Sampler):
-  """Convex hull sampler of points from (U[0, 1], U[0, 1])."""
+  """Convex hull sampler of points over a disk of radius r."""
 
-  def _sample_data(self, length: int, low: float = 0., high: float = 1.):
-    xs = self._random_sequence(length=length, low=low, high=high)
-    ys = self._random_sequence(length=length, low=low, high=high)
+  def _sample_data(self, length: int, origin_x: float = 0.,
+                   origin_y: float = 0., radius: float = 2.):
+
+    thetas = self._random_sequence(length=length, low=0.0, high=2.0 * np.pi)
+    rs = radius * np.sqrt(
+        self._random_sequence(length=length, low=0.0, high=1.0))
+
+    xs = rs * np.cos(thetas) + origin_x
+    ys = rs * np.sin(thetas) + origin_y
+
     return [xs, ys]
 
 
