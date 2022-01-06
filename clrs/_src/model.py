@@ -79,8 +79,18 @@ def _eval_one(pred, truth):
 
 
 def _mask_fn(pred, truth):
+  """Evaluate outputs of type MASK, and account for any class imbalance."""
   mask = (truth != specs.OutputClass.MASKED.value).astype(np.float32)
-  return np.sum((((pred > 0.0) == (truth > 0.5)) * 1.0) * mask)/np.sum(mask)
+
+  # Use F1 score for the masked outputs to address any imbalance
+  tp = np.sum((((pred > 0.0) * (truth > 0.5)) * 1.0) * mask)
+  fp = np.sum((((pred > 0.0) * (truth < 0.5)) * 1.0) * mask)
+  fn = np.sum((((pred < 0.0) * (truth > 0.5)) * 1.0) * mask)
+
+  precision = tp / (tp + fp)
+  recall = tp / (tp + fn)
+  f_1 = 2.0 * precision * recall / (precision + recall)
+  return f_1
 
 _EVAL_FN = {
     specs.Type.SCALAR:
