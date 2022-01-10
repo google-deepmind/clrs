@@ -95,7 +95,7 @@ def main(unused_argv):
     return {k: unpack(v) for k, v in out.items()}
 
   # Training loop.
-  best_score = 0.
+  best_score = -1.0  # Ensure that there is overwriting
 
   for step in range(FLAGS.train_steps):
     feedback = train_sampler.next(FLAGS.batch_size)

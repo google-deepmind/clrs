@@ -83,13 +83,25 @@ def _mask_fn(pred, truth):
   mask = (truth != specs.OutputClass.MASKED.value).astype(np.float32)
 
   # Use F1 score for the masked outputs to address any imbalance
-  tp = np.sum((((pred > 0.0) * (truth > 0.5)) * 1.0) * mask)
-  fp = np.sum((((pred > 0.0) * (truth < 0.5)) * 1.0) * mask)
-  fn = np.sum((((pred < 0.0) * (truth > 0.5)) * 1.0) * mask)
+  tp = np.sum((((pred > 0.5) * (truth > 0.5)) * 1.0) * mask)
+  fp = np.sum((((pred > 0.5) * (truth < 0.5)) * 1.0) * mask)
+  fn = np.sum((((pred < 0.5) * (truth > 0.5)) * 1.0) * mask)
 
-  precision = tp / (tp + fp)
-  recall = tp / (tp + fn)
-  f_1 = 2.0 * precision * recall / (precision + recall)
+  # Protect against division by zero
+  if tp + fp > 0:
+    precision = tp / (tp + fp)
+  else:
+    precision = np.float32(1.0)
+  if tp + fn > 0:
+    recall = tp / (tp + fn)
+  else:
+    recall = np.float32(1.0)
+
+  if precision + recall > 0.0:
+    f_1 = 2.0 * precision * recall / (precision + recall)
+  else:
+    f_1 = np.float32(0.0)
+
   return f_1
 
 _EVAL_FN = {
