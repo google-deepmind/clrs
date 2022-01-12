@@ -446,12 +446,12 @@ class ArticulationSampler(Sampler):
 
 
 class MSTSampler(Sampler):
-  """MST sampler."""
+  """MST sampler for Kruskal's algorithm."""
 
   def _sample_data(
       self,
       length: int,
-      p: float = 0.5,
+      p: float = 0.2,  # lower p to account for class imbalance
       low: float = 0.,
       high: float = 1.,
   ):
@@ -508,6 +508,27 @@ class DAGPathSampler(Sampler):
         high=high)
     source_node = self._rng.choice(length)
     return [graph, source_node]
+
+
+class FloydWarshallSampler(Sampler):
+  """Sampler for all-pairs shortest paths."""
+
+  def _sample_data(
+      self,
+      length: int,
+      p: float = 0.5,
+      low: float = 0.,
+      high: float = 1.,
+  ):
+    graph = self._random_er_graph(
+        nb_nodes=length,
+        p=p,
+        directed=False,
+        acyclic=False,
+        weighted=True,
+        low=low,
+        high=high)
+    return [graph]
 
 
 class SccSampler(Sampler):
@@ -634,7 +655,7 @@ SAMPLERS = {
     'bellman_ford': BellmanFordSampler,
     'dag_shortest_paths': DAGPathSampler,
     'dijkstra': BellmanFordSampler,
-    'floyd_warshall': MSTSampler,
+    'floyd_warshall': FloydWarshallSampler,
     'bipartite_matching': BipartiteSampler,
     'naive_string_matcher': MatcherSampler,
     'kmp_matcher': MatcherSampler,
