@@ -19,7 +19,7 @@ import functools
 import os
 import pickle
 
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Optional
 
 import chex
 
@@ -64,6 +64,7 @@ class _MessagePassingScanState:
   gt_diffs: chex.Array
   output_preds: chex.Array
   hiddens: chex.Array
+  lstm_state: Optional[hk.LSTMState]
 
 
 class Net(hk.Module):
@@ -79,6 +80,7 @@ class Net(hk.Module):
       kind: str,
       inf_bias: bool,
       inf_bias_edge: bool,
+      use_lstm: bool,
       nb_dims=None,
       name: str = 'net',
   ):
@@ -94,6 +96,7 @@ class Net(hk.Module):
     self.decode_diffs = decode_diffs
     self.kind = kind
     self.nb_dims = nb_dims
+    self.use_lstm = use_lstm
 
   def _msg_passing_step(self,
                         mp_state: _MessagePassingScanState,
@@ -135,8 +138,9 @@ class Net(hk.Module):
       for loc in _Location:
         gt_diffs[loc] = (gt_diffs[loc] > 0.0).astype(jnp.float32) * 1.0
 
-    hiddens, output_preds_cand, hint_preds, diff_logits = self._one_step_pred(
-        inputs, cur_hint, mp_state.hiddens, nb_nodes)
+    (hiddens, output_preds_cand, hint_preds, diff_logits,
+     lstm_state) = self._one_step_pred(
+         inputs, cur_hint, mp_state.hiddens, nb_nodes, mp_state.lstm_state)
 
     if first_step:
       output_preds = output_preds_cand
@@ -169,7 +173,7 @@ class Net(hk.Module):
               cur_diffs * hint_preds[hint.name] + (1.0 - cur_diffs) * prev_hint)
     new_mp_state = _MessagePassingScanState(
         hint_preds=hint_preds, diff_logits=diff_logits, gt_diffs=gt_diffs,
-        output_preds=output_preds, hiddens=hiddens)
+        output_preds=output_preds, hiddens=hiddens, lstm_state=lstm_state)
     # Complying to jax.scan, the first returned value is the state we carry over
     # the second value is the output that will be stacked over steps.
     return new_mp_state, new_mp_state
@@ -192,9 +196,20 @@ class Net(hk.Module):
     nb_mp_steps = max(1, hints[0].data.shape[0] - 1)
     hiddens = jnp.zeros((self.batch_size, nb_nodes, self.hidden_dim))
 
+    if self.use_lstm:
+      self.lstm = hk.LSTM(
+          hidden_size=self.hidden_dim,
+          name='processor_lstm')
+      lstm_state = self.lstm.initial_state(self.batch_size * nb_nodes)
+      lstm_state = jax.tree_multimap(
+          lambda x: jnp.reshape(x, [self.batch_size, nb_nodes, -1]), lstm_state)
+    else:
+      self.lstm = None
+      lstm_state = None
+
     mp_state = _MessagePassingScanState(
         hint_preds=None, diff_logits=None, gt_diffs=None,
-        output_preds=None, hiddens=hiddens)
+        output_preds=None, hiddens=hiddens, lstm_state=lstm_state)
 
     # Do the first step outside of the scan because it has a different
     # computation graph.
@@ -373,6 +388,7 @@ class Net(hk.Module):
       hints: _Trajectory,
       hidden: _Array,
       nb_nodes: int,
+      lstm_state: Optional[hk.LSTMState],
   ):
     """Generates one step predictions."""
 
@@ -465,6 +481,12 @@ class Net(hk.Module):
     z = jnp.concatenate([node_fts, hidden], axis=-1)
     nxt_hidden = self.mpnn(z, edge_fts, graph_fts,
                            (adj_mat > 0.0).astype('float32'))
+    if self.use_lstm:
+      # lstm doesn't accept multiple batch dimensions (in our case, batch and
+      # nodes), so we vmap over the (first) batch dimension.
+      nxt_hidden, nxt_lstm_state = jax.vmap(self.lstm)(nxt_hidden, lstm_state)
+    else:
+      nxt_lstm_state = None
     h_t = jnp.concatenate([z, nxt_hidden], axis=-1)
 
     hint_preds = {}
@@ -610,7 +632,7 @@ class Net(hk.Module):
         else:
           raise ValueError('Invalid output type')
 
-    return nxt_hidden, output_preds, hint_preds, diff_preds
+    return nxt_hidden, output_preds, hint_preds, diff_preds, nxt_lstm_state
 
 
 class BaselineModel(model.Model):
@@ -624,6 +646,7 @@ class BaselineModel(model.Model):
       encode_hints=False,
       decode_hints=True,
       decode_diffs=False,
+      use_lstm=False,
       learning_rate=0.005,
       checkpoint_path='/tmp/clrs3',
       freeze_processor=False,
@@ -661,7 +684,8 @@ class BaselineModel(model.Model):
 
     def _use_net(*args, **kwargs):
       return Net(spec, hidden_dim, encode_hints, decode_hints, decode_diffs,
-                 kind, inf_bias, inf_bias_edge, self.nb_dims)(*args, **kwargs)
+                 kind, inf_bias, inf_bias_edge, use_lstm, self.nb_dims,
+                 )(*args, **kwargs)
 
     self.net_fn = hk.without_apply_rng(hk.transform(_use_net))
     self.net_fn_apply = jax.jit(self.net_fn.apply, static_argnums=2)

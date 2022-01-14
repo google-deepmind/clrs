@@ -39,6 +39,8 @@ flags.DEFINE_boolean('encode_hints', True,
                      'Whether to provide hints as model inputs.')
 flags.DEFINE_boolean('decode_hints', True,
                      'Whether to provide hints as model outputs.')
+flags.DEFINE_boolean('use_lstm', False,
+                     'Whether to insert an LSTM after message passing.')
 flags.DEFINE_boolean('decode_diffs', True,
                      'Whether to predict masks within the model.')
 flags.DEFINE_enum('processor_type', 'mpnn',
@@ -69,6 +71,7 @@ def main(unused_argv):
       encode_hints=FLAGS.encode_hints,
       decode_hints=FLAGS.decode_hints,
       decode_diffs=FLAGS.decode_diffs,
+      use_lstm=FLAGS.use_lstm,
       kind=FLAGS.processor_type,
       learning_rate=FLAGS.learning_rate,
       checkpoint_path=FLAGS.checkpoint_path,
