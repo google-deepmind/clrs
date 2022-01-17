@@ -61,26 +61,35 @@ class OutputClass:
 
 Spec = Dict[str, Tuple[str, str, str]]
 
-CLRS_21_ALGS = [
+CLRS_30_ALGS = [
+    'articulation_points',
+    'activity_selector',
     'bellman_ford',
     'bfs',
     'binary_search',
+    'bridges',
     'bubble_sort',
     'dag_shortest_paths',
     'dfs',
     'dijkstra',
     'find_maximum_subarray_kadane',
     'floyd_warshall',
+    'graham_scan',
     'heapsort',
     'insertion_sort',
+    'jarvis_march',
     'kmp_matcher',
+    'lcs_length',
     'matrix_chain_order',
     'minimum',
+    'mst_kruskal',
     'mst_prim',
     'naive_string_matcher',
     'optimal_bst',
     'quickselect',
     'quicksort',
+    'segments_intersect',
+    'strongly_connected_components',
     'task_scheduling',
     'topological_sort',
 ]

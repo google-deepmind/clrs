@@ -58,9 +58,9 @@ FLAGS = flags.FLAGS
 
 
 def main(unused_argv):
-  # Use canonical CLRS-21 samplers.
-  clrs21_spec = clrs.CLRS21
-  logging.info('Using CLRS21 spec: %s', clrs21_spec)
+  # Use canonical CLRS-30 samplers.
+  clrs30_spec = clrs.CLRS30
+  logging.info('Using CLRS30 spec: %s', clrs30_spec)
   train_sampler, spec = clrs.create_dataset(
       folder=FLAGS.dataset_path, algorithm=FLAGS.algorithm,
       split='train', batch_size=FLAGS.batch_size)

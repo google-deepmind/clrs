@@ -37,8 +37,8 @@ Algorithm = Callable[..., Any]
 Features = collections.namedtuple('Features', ['inputs', 'hints', 'lengths'])
 Feedback = collections.namedtuple('Feedback', ['features', 'outputs'])
 
-# CLRS-21 baseline spec.
-CLRS21 = types.MappingProxyType({
+# CLRS-30 baseline spec.
+CLRS30 = types.MappingProxyType({
     'train': {
         'num_samples': 1000,
         'length': 16,

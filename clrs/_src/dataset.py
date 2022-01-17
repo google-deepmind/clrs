@@ -42,7 +42,7 @@ DEFAULT_BUILDER_CONFIGS = []
 
 def _build_default_builder_configs():
   for split in ['train', 'val', 'test']:
-    for alg in specs.CLRS_21_ALGS:
+    for alg in specs.CLRS_30_ALGS:
       DEFAULT_BUILDER_CONFIGS.append(
           CLRSConfig(name=f'{alg}_{split}', split=split))
 
@@ -69,9 +69,9 @@ class CLRSDataset(tfds.core.GeneratorBasedBuilder):
     algorithm_name = '_'.join(self._builder_config.name.split('_')[:-1])
     sampler, _ = samplers.build_sampler(
         algorithm_name,
-        seed=samplers.CLRS21[self._builder_config.split]['seed'],
-        num_samples=samplers.CLRS21[self._builder_config.split]['num_samples'],
-        length=samplers.CLRS21[self._builder_config.split]['length'],
+        seed=samplers.CLRS30[self._builder_config.split]['seed'],
+        num_samples=samplers.CLRS30[self._builder_config.split]['num_samples'],
+        length=samplers.CLRS30[self._builder_config.split]['length'],
     )
     sampled_dataset = sampler.next()
     data = {'input_' + t.name: t.data for t in sampled_dataset.features.inputs}
@@ -108,7 +108,7 @@ class CLRSDataset(tfds.core.GeneratorBasedBuilder):
 
   def _generate_examples(self):
     """Generator of examples for each split."""
-    for i in range(samplers.CLRS21[self._builder_config.split]['num_samples']):
+    for i in range(samplers.CLRS30[self._builder_config.split]['num_samples']):
       data = {k: _correct_axis_filtering(v, i, k)
               for k, v in self._instantiated_dataset.items()}
       yield str(i), data

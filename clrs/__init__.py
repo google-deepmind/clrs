@@ -24,7 +24,7 @@ from clrs._src.model import evaluate
 from clrs._src.model import Model
 from clrs._src.probing import DataPoint
 from clrs._src.samplers import build_sampler
-from clrs._src.samplers import CLRS21
+from clrs._src.samplers import CLRS30
 from clrs._src.samplers import Features
 from clrs._src.samplers import Feedback
 from clrs._src.samplers import Sampler
@@ -40,7 +40,7 @@ __version__ = "0.0.2"
 
 __all__ = (
     "build_sampler",
-    "CLRS21",
+    "CLRS30",
     "create_dataset",
     "DataPoint",
     "evaluate",
