@@ -25,9 +25,11 @@ format (`ProbesDict`) to facilate efficient contest-based look-up.
 
 from typing import Dict, List, Tuple, Union
 
+import attr
 from clrs._src import specs
 import jax
 import numpy as np
+import tensorflow as tf
 
 
 _Location = specs.Location
@@ -37,34 +39,48 @@ _OutputClass = specs.OutputClass
 
 _Array = np.ndarray
 _Data = Union[_Array, List[_Array]]
-_DataOrType = Union[_Data, _Type]
+_DataOrType = Union[_Data, str]
 
-ProbesDict = Dict[_Stage, Dict[_Location, Dict[str, Dict[str, _DataOrType]]]]
-
-
-class ProbeError(Exception):
-  pass
+ProbesDict = Dict[
+    str, Dict[str, Dict[str, Dict[str, _DataOrType]]]]
 
 
+def _convert_to_str(element):
+  if isinstance(element, tf.Tensor):
+    return element.numpy().decode('utf-8')
+  elif isinstance(element, (np.ndarray, bytes)):
+    return element.decode('utf-8')
+  else:
+    return element
+
+
+# First anotation makes this object jax.jit/pmap friendly, second one makes this
+# tf.data.Datasets friendly.
 @jax.tree_util.register_pytree_node_class
+@attr.define
 class DataPoint:
   """Describes a data point."""
 
-  def __init__(
-      self,
-      name: str,
-      location: _Location,
-      type_: _Type,
-      data: _Array,
-  ):
-    self.name = name
-    self.location = location
-    self.type_ = type_
-    self.data = data
+  _name: str
+  _location: str
+  _type_: str
+  data: _Array
+
+  @property
+  def name(self):
+    return _convert_to_str(self._name)
+
+  @property
+  def location(self):
+    return _convert_to_str(self._location)
+
+  @property
+  def type_(self):
+    return _convert_to_str(self._type_)
 
   def __repr__(self):
-    s = f'DataPoint(name="{self.name}",\tlocation={self.location.name},\t'
-    return s + f'type={self.type_.name},\tdata=Array{self.data.shape})'
+    s = f'DataPoint(name="{self.name}",\tlocation={self.location},\t'
+    return s + f'type={self.type_},\tdata=Array{self.data.shape})'
 
   def tree_flatten(self):
     data = (self.data,)
@@ -78,6 +94,10 @@ class DataPoint:
     return DataPoint(name, location, type_, subdata)
 
 
+class ProbeError(Exception):
+  pass
+
+
 def initialize(spec: specs.Spec) -> ProbesDict:
   """Initializes an empty `ProbesDict` corresponding with the provided spec."""
   probes = dict()
@@ -89,13 +109,14 @@ def initialize(spec: specs.Spec) -> ProbesDict:
   for name in spec:
     stage, loc, t = spec[name]
     probes[stage][loc][name] = {}
-    probes[stage][loc][name]['type_'] = t
     probes[stage][loc][name]['data'] = []
+    probes[stage][loc][name]['type_'] = t
+  # Pytype thinks initialize() returns a ProbesDict with a str for all final
+  # values instead of _DataOrType.
+  return probes  # pytype: disable=bad-return-type
 
-  return probes
 
-
-def push(probes: ProbesDict, stage: _Stage, next_probe):
+def push(probes: ProbesDict, stage: str, next_probe):
   """Pushes a probe into an existing `ProbesDict`."""
   for loc in [_Location.NODE, _Location.EDGE, _Location.GRAPH]:
     for name in probes[stage][loc]:
@@ -103,7 +124,9 @@ def push(probes: ProbesDict, stage: _Stage, next_probe):
         raise ProbeError(f'Missing probe for {name}.')
       if isinstance(probes[stage][loc][name]['data'], _Array):
         raise ProbeError('Attemping to push to finalized `ProbesDict`.')
-      probes[stage][loc][name]['data'].append(next_probe[name])
+      # Pytype thinks initialize() returns a ProbesDict with a str for all final
+      # values instead of _DataOrType.
+      probes[stage][loc][name]['data'].append(next_probe[name])  # pytype: disable=attribute-error
 
 
 def finalize(probes: ProbesDict):
@@ -249,15 +272,15 @@ def strings_pair_cat(pair_probe: np.ndarray, nb_classes: int) -> np.ndarray:
   probe_ret = np.zeros((n + m, n + m, nb_classes + 1))
   for i in range(0, n):
     for j in range(0, m):
-      probe_ret[i, j + n, int(pair_probe[i, j])] = _OutputClass.POSITIVE.value
+      probe_ret[i, j + n, int(pair_probe[i, j])] = _OutputClass.POSITIVE
 
   # Fill the blank cells.
   for i_1 in range(0, n):
     for i_2 in range(0, n):
-      probe_ret[i_1, i_2, nb_classes] = _OutputClass.MASKED.value
+      probe_ret[i_1, i_2, nb_classes] = _OutputClass.MASKED
   for j_1 in range(0, m):
     for x in range(0, n + m):
-      probe_ret[j_1 + n, x, nb_classes] = _OutputClass.MASKED.value
+      probe_ret[j_1 + n, x, nb_classes] = _OutputClass.MASKED
   return probe_ret
 
 

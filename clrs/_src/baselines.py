@@ -135,7 +135,7 @@ class Net(hk.Module):
           hint_cur = jnp.expand_dims(hint_cur, -1)
           hint_nxt = jnp.expand_dims(hint_nxt, -1)
         gt_diffs[hint.location] += jnp.any(hint_cur != hint_nxt, axis=-1)
-      for loc in _Location:
+      for loc in [_Location.NODE, _Location.EDGE, _Location.GRAPH]:
         gt_diffs[loc] = (gt_diffs[loc] > 0.0).astype(jnp.float32) * 1.0
 
     (hiddens, output_preds_cand, hint_preds, diff_logits,
@@ -156,7 +156,7 @@ class Net(hk.Module):
       if self.decode_hints:
         if hints[0].data.shape[0] == 1 or repred:
           diff_preds = {}
-          for loc in _Location:
+          for loc in [_Location.NODE, _Location.EDGE, _Location.GRAPH]:
             diff_preds[loc] = (diff_logits[loc] > 0.0).astype(jnp.float32) * 1.0
         else:
           diff_preds = gt_diffs
@@ -730,7 +730,7 @@ class BaselineModel(model.Model):
       total_loss = 0.0
       lengths = feedback.features.lengths
       if self.decode_diffs:
-        for loc in _Location:
+        for loc in [_Location.NODE, _Location.EDGE, _Location.GRAPH]:
           for i in range(len(gt_diffs)):
             is_not_done = _is_not_done_broadcast(
                 lengths, i, diff_logits[i][loc])
@@ -767,7 +767,7 @@ class BaselineModel(model.Model):
                 loss = jnp.mean(
                     jnp.maximum(pred, 0) - pred * truth.data[i + 1] +
                     jnp.log1p(jnp.exp(-jnp.abs(pred))) * is_not_done)
-              mask = (truth.data != _OutputClass.MASKED.value).astype(
+              mask = (truth.data != _OutputClass.MASKED).astype(
                   jnp.float32)
               total_loss += jnp.sum(loss*mask)/jnp.sum(mask)
             elif truth.type_ == _Type.MASK_ONE:
@@ -783,9 +783,9 @@ class BaselineModel(model.Model):
                         pred) * is_not_done, axis=-1))
             elif truth.type_ == _Type.CATEGORICAL:
               unmasked_data = truth.data[
-                  truth.data == _OutputClass.POSITIVE.value]
+                  truth.data == _OutputClass.POSITIVE]
               masked_truth = truth.data * (
-                  truth.data != _OutputClass.MASKED.value).astype(jnp.float32)
+                  truth.data != _OutputClass.MASKED).astype(jnp.float32)
               if self.decode_diffs:
                 total_loss += jnp.sum(
                     -jnp.sum(
@@ -820,12 +820,12 @@ class BaselineModel(model.Model):
         elif truth.type_ == _Type.MASK:
           loss = (jnp.maximum(pred, 0) - pred * truth.data +
                   jnp.log1p(jnp.exp(-jnp.abs(pred))))
-          mask = (truth.data != _OutputClass.MASKED.value).astype(jnp.float32)
+          mask = (truth.data != _OutputClass.MASKED).astype(jnp.float32)
           total_loss += jnp.sum(loss*mask)/jnp.sum(mask)
         elif truth.type_ in [_Type.MASK_ONE, _Type.CATEGORICAL]:
-          unmasked_data = truth.data[truth.data == _OutputClass.POSITIVE.value]
+          unmasked_data = truth.data[truth.data == _OutputClass.POSITIVE]
           masked_truth = truth.data * (
-              truth.data != _OutputClass.MASKED.value).astype(jnp.float32)
+              truth.data != _OutputClass.MASKED).astype(jnp.float32)
           total_loss += (
               -jnp.sum(masked_truth * jax.nn.log_softmax(pred))
               / jnp.sum(unmasked_data))
@@ -864,14 +864,14 @@ class BaselineModel(model.Model):
 
     losses = {}
     if self.decode_diffs:
-      for loc in _Location:
+      for loc in [_Location.NODE, _Location.EDGE, _Location.GRAPH]:
         for i in range(len(gt_diffs)):
           is_not_done = _is_not_done_broadcast(lengths, i, gt_diffs[i][loc])
           diff_loss = (
               jnp.maximum(diff_logits[i][loc], 0) -
               diff_logits[i][loc] * gt_diffs[i][loc] +
               jnp.log1p(jnp.exp(-jnp.abs(diff_logits[i][loc]))) * is_not_done)
-          losses[loc.name + '_diff_%d' % i] = jnp.mean(diff_loss)
+          losses[loc + '_diff_%d' % i] = jnp.mean(diff_loss)
 
     if self.decode_hints:
       for truth in feedback.features.hints:

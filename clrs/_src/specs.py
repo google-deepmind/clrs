@@ -30,31 +30,23 @@ At minimum, each node contains a `pos` probe that serves as a unique index e.g.
 for representing sequential data where appropriate
 """
 
-import enum
 import types
 from typing import Dict, Tuple
 
 
-class _OrderedEnum(enum.Enum):
-
-  def __lt__(self, other):
-    assert self.__class__ is other.__class__
-    return self.value < other.value  # pylint: disable=comparison-with-callable
-
-
-class Stage(_OrderedEnum):
+class Stage:
   INPUT = 'input'
   OUTPUT = 'output'
   HINT = 'hint'
 
 
-class Location(_OrderedEnum):
+class Location:
   NODE = 'node'
   EDGE = 'edge'
   GRAPH = 'graph'
 
 
-class Type(_OrderedEnum):
+class Type:
   SCALAR = 'scalar'
   CATEGORICAL = 'categorical'
   MASK = 'mask'
@@ -62,12 +54,12 @@ class Type(_OrderedEnum):
   POINTER = 'pointer'
 
 
-class OutputClass(_OrderedEnum):
+class OutputClass:
   POSITIVE = 1
   NEGATIVE = 0
   MASKED = -1
 
-Spec = Dict[str, Tuple[Stage, Location, Type]]
+Spec = Dict[str, Tuple[str, str, str]]
 
 CLRS_21_ALGS = [
     'bellman_ford',

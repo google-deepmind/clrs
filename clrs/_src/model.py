@@ -73,14 +73,14 @@ def evaluate(
 
 
 def _eval_one(pred, truth):
-  mask = np.all(truth != specs.OutputClass.MASKED.value, axis=-1)
+  mask = np.all(truth != specs.OutputClass.MASKED, axis=-1)
   return np.sum(
       (np.argmax(pred, -1) == np.argmax(truth, -1)) * mask) / np.sum(mask)
 
 
 def _mask_fn(pred, truth):
   """Evaluate outputs of type MASK, and account for any class imbalance."""
-  mask = (truth != specs.OutputClass.MASKED.value).astype(np.float32)
+  mask = (truth != specs.OutputClass.MASKED).astype(np.float32)
 
   # Use F1 score for the masked outputs to address any imbalance
   tp = np.sum((((pred > 0.5) * (truth > 0.5)) * 1.0) * mask)

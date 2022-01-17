@@ -542,7 +542,7 @@ def bridges(A: _Array) -> _Out:
 
   low = np.zeros(A.shape[0])
   is_bridge = (
-      np.zeros((A.shape[0], A.shape[0])) + _OutputClass.MASKED.value + adj)
+      np.zeros((A.shape[0], A.shape[0])) + _OutputClass.MASKED + adj)
 
   for s in range(A.shape[0]):
     if color[s] == 0:
@@ -1523,7 +1523,7 @@ def bipartite_matching(A: _Array, n: int, m: int, s: int, t: int) -> _Out:
           't': probing.mask_one(t, A.shape[0])
       })
   in_matching = (
-      np.zeros((A.shape[0], A.shape[1])) + _OutputClass.MASKED.value + adj
+      np.zeros((A.shape[0], A.shape[1])) + _OutputClass.MASKED + adj
       + adj.T)
   u = t
   while True:
