@@ -101,24 +101,34 @@ examples using JAX and the DeepMind JAX Ecosystem of libraries.
 
 ### Algorithms
 
-Our initial CLRS-21 benchmark includes the following 21 algorithms. More
-algorithms will be supported in the near future.
+Our initial CLRS-30 benchmark includes the following 30 algorithms. We aim to
+support more algorithms in the future.
 
 - Divide and conquer
   - Maximum subarray (Kadane)
 - Dynamic programming
+  - Longest common subsequence
   - Matrix chain order
   - Optimal binary search tree
+- Geometry
+  - Graham scan
+  - Jarvis' march
+  - Segment intersection
 - Graphs
   - Depth-first search
   - Breadth-first search
   - Topological sort
+  - Articulation points
+  - Bridges
+  - Strongly connected components (Kosaraju)
   - Minimum spanning tree (Prim)
-  - Single-source shortest-path (Bellman Ford)
+  - Minimum spanning tree (Kruskal)
+  - Single-source shortest-path (Bellman-Ford)
   - Single-source shortest-path (Dijsktra)
   - DAG shortest paths
-  - All-pairs shortest-path (Floyd Warshall)
+  - All-pairs shortest-path (Floyd-Warshall)
 - Greedy
+  - Activity selector
   - Task scheduling
 - Searching
   - Minimum
@@ -131,7 +141,7 @@ algorithms will be supported in the near future.
   - Quicksort
 - Strings
   - String matcher (naive)
-  - String matcher (KMP)
+  - String matcher (Knuth-Morris-Pratt)
 
 ### Baselines
 
