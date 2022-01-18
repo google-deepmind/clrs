@@ -81,12 +81,14 @@ class Net(hk.Module):
       inf_bias: bool,
       inf_bias_edge: bool,
       use_lstm: bool,
+      dropout_prob: float,
       nb_dims=None,
       name: str = 'net',
   ):
     """Constructs a `Net`."""
     super().__init__(name=name)
 
+    self._dropout_prob = dropout_prob
     self.spec = spec
     self.inf_bias = inf_bias
     self.inf_bias_edge = inf_bias_edge
@@ -481,6 +483,7 @@ class Net(hk.Module):
     z = jnp.concatenate([node_fts, hidden], axis=-1)
     nxt_hidden = self.mpnn(z, edge_fts, graph_fts,
                            (adj_mat > 0.0).astype('float32'))
+    nxt_hidden = hk.dropout(hk.next_rng_key(), self._dropout_prob, nxt_hidden)
     if self.use_lstm:
       # lstm doesn't accept multiple batch dimensions (in our case, batch and
       # nodes), so we vmap over the (first) batch dimension.
@@ -651,6 +654,7 @@ class BaselineModel(model.Model):
       checkpoint_path='/tmp/clrs3',
       freeze_processor=False,
       dummy_trajectory=None,
+      dropout_prob=0.0,
       name='base_model',
   ):
     super(BaselineModel, self).__init__(spec=spec)
@@ -684,11 +688,11 @@ class BaselineModel(model.Model):
 
     def _use_net(*args, **kwargs):
       return Net(spec, hidden_dim, encode_hints, decode_hints, decode_diffs,
-                 kind, inf_bias, inf_bias_edge, use_lstm, self.nb_dims,
-                 )(*args, **kwargs)
+                 kind, inf_bias, inf_bias_edge, use_lstm, dropout_prob,
+                 self.nb_dims)(*args, **kwargs)
 
-    self.net_fn = hk.without_apply_rng(hk.transform(_use_net))
-    self.net_fn_apply = jax.jit(self.net_fn.apply, static_argnums=2)
+    self.net_fn = hk.transform(_use_net)
+    self.net_fn_apply = jax.jit(self.net_fn.apply, static_argnums=3)
     self.params = None
     self.opt_state = None
 
@@ -696,31 +700,31 @@ class BaselineModel(model.Model):
     self.params = self.net_fn.init(jax.random.PRNGKey(seed), features, True)
     self.opt_state = self.opt.init(self.params)
 
-  def feedback(self, feedback: _Feedback) -> float:
+  def feedback(self, rng_key: hk.PRNGSequence, feedback: _Feedback) -> float:
     """Advance to the next task, incorporating any available feedback."""
-    self.params, self.opt_state, cur_loss = self.update(self.params,
-                                                        self.opt_state,
-                                                        feedback)
+    self.params, self.opt_state, cur_loss = self.update(
+        rng_key, self.params, self.opt_state, feedback)
     return cur_loss
 
-  def predict(self, features: _Features):
+  def predict(self, rng_key: hk.PRNGSequence, features: _Features):
     """Model inference step."""
     outs, hint_preds, diff_logits, gt_diff = self.net_fn_apply(
-        self.params, features, True)
+        self.params, rng_key, features, True)
     return _decode_from_preds(self.spec,
                               outs), (hint_preds, diff_logits, gt_diff)
 
   def update(
       self,
+      rng_key: hk.PRNGSequence,
       params: hk.Params,
       opt_state: optax.OptState,
       feedback: _Feedback,
   ) -> Tuple[hk.Params, optax.OptState, _Array]:
     """Model update step."""
 
-    def loss(params, feedback):
+    def loss(params, rng_key, feedback):
       (output_preds, hint_preds, diff_logits,
-       gt_diffs) = self.net_fn_apply(params, feedback.features, False)
+       gt_diffs) = self.net_fn_apply(params, rng_key, feedback.features, False)
 
       for inp in feedback.features.inputs:
         if inp.location in [_Location.NODE, _Location.EDGE]:
@@ -839,7 +843,7 @@ class BaselineModel(model.Model):
 
       return total_loss
 
-    lss, grads = jax.value_and_grad(loss)(params, feedback)
+    lss, grads = jax.value_and_grad(loss)(params, rng_key, feedback)
     updates, opt_state = self.opt.update(grads, opt_state)
     if self._freeze_processor:
       params_subset = _filter_processor(params)

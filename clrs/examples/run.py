@@ -21,6 +21,7 @@ from absl import flags
 from absl import logging
 
 import clrs
+import jax
 
 
 flags.DEFINE_string('algorithm', 'bfs', 'Which algorithm to run.')
@@ -34,6 +35,7 @@ flags.DEFINE_boolean('verbose_logging', False, 'Whether to log aux losses.')
 flags.DEFINE_integer('hidden_size', 128,
                      'Number of hidden size units of the model.')
 flags.DEFINE_float('learning_rate', 0.003, 'Learning rate to use.')
+flags.DEFINE_float('dropout_prob', 0.1, 'Dropout rate to use.')
 
 flags.DEFINE_boolean('encode_hints', True,
                      'Whether to provide hints as model inputs.')
@@ -81,14 +83,15 @@ def main(unused_argv):
       learning_rate=FLAGS.learning_rate,
       checkpoint_path=FLAGS.checkpoint_path,
       freeze_processor=FLAGS.freeze_processor,
+      dropout_prob=FLAGS.dropout_prob,
       dummy_trajectory=next(train_sampler),
   )
 
-  def evaluate(step, model, feedback, extras=None, verbose=False):
+  def evaluate(rng_key, step, model, feedback, extras=None, verbose=False):
     """Evaluates a model on feedback."""
     examples_per_step = len(feedback.features.lengths)
     out = {'step': step, 'examples_seen': step * examples_per_step}
-    predictions, aux = model.predict(feedback.features)
+    predictions, aux = model.predict(rng_key, feedback.features)
     out.update(clrs.evaluate(feedback, predictions))
     if extras:
       out.update(extras)
@@ -104,6 +107,7 @@ def main(unused_argv):
 
   # Training loop.
   best_score = -1.0  # Ensure that there is overwriting
+  rng_key = jax.random.PRNGKey(FLAGS.seed)
 
   for step in range(FLAGS.train_steps):
     feedback = next(train_sampler)
@@ -111,29 +115,36 @@ def main(unused_argv):
     # Initialize model.
     if step == 0:
       t = time.time()
-      model.init(feedback.features, FLAGS.seed)
+      model.init(feedback.features, FLAGS.seed + 1)
 
     # Training step step.
-    cur_loss = model.feedback(feedback)
+    rng_key, new_rng_key = jax.random.split(rng_key)
+    cur_loss = model.feedback(rng_key, feedback)
+    rng_key = new_rng_key
     if step == 0:
       logging.info('Compiled feedback step in %f s.', time.time() - t)
 
     # Periodically evaluate model.
     if step % FLAGS.log_every == 0:
       # Training info.
+      rng_key, new_rng_key = jax.random.split(rng_key)
       train_stats = evaluate(
+          rng_key,
           step,
           model,
           feedback,
           extras={'loss': cur_loss},
           verbose=FLAGS.verbose_logging,
       )
+      rng_key = new_rng_key
       logging.info('(train) step %d: %s', step, train_stats)
 
       # Validation info.
       val_feedback = next(val_sampler)  # full-batch
+      rng_key, new_rng_key = jax.random.split(rng_key)
       val_stats = evaluate(
-          step, model, val_feedback, verbose=FLAGS.verbose_logging)
+          rng_key, step, model, val_feedback, verbose=FLAGS.verbose_logging)
+      rng_key = new_rng_key
       logging.info('(val) step %d: %s', step, val_stats)
 
       # If best scores, update checkpoint.
@@ -151,8 +162,10 @@ def main(unused_argv):
   model.restore_model('best.pkl', only_load_processor=False)
 
   test_feedback = next(test_sampler.as_numpy_iterator())  # full-batch
+  rng_key, new_rng_key = jax.random.split(rng_key)
   test_stats = evaluate(
-      step, model, test_feedback, verbose=FLAGS.verbose_logging)
+      rng_key, step, model, test_feedback, verbose=FLAGS.verbose_logging)
+  rng_key = new_rng_key
   logging.info('(test) step %d: %s', step, test_stats)
 
 
