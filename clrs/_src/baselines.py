@@ -383,6 +383,15 @@ class Net(hk.Module):
           nb_heads=1,
           activation=jax.nn.relu,
           residual=True)
+    elif self.kind == 'memnet_full' or self.kind == 'memnet_masked':
+      self.memnet = processors.MemNet(
+          vocab_size=self.hidden_dim,
+          embedding_size=self.hidden_dim,
+          sentence_size=self.hidden_dim,
+          linear_output_size=self.hidden_dim,
+          memory_size=self.nb_dims['adj'] + 1,
+          num_hops=1,
+          apply_embeddings=True)
 
   def _one_step_pred(
       self,
@@ -473,23 +482,37 @@ class Net(hk.Module):
     if self.kind == 'deepsets':
       adj_mat = jnp.repeat(
           jnp.expand_dims(jnp.eye(nb_nodes), 0), self.batch_size, axis=0)
-    elif self.kind == 'mpnn' or self.kind == 'gat':
+    elif (self.kind == 'mpnn' or self.kind == 'gat' or
+          self.kind == 'memnet_full'):
       adj_mat = jnp.ones_like(adj_mat)
-    elif self.kind == 'pgn':
+    elif self.kind == 'pgn' or self.kind == 'memnet_masked':
       adj_mat = (adj_mat > 0.0) * 1.0
     else:
       raise ValueError('Unsupported kind of model')
 
     z = jnp.concatenate([node_fts, hidden], axis=-1)
-    nxt_hidden = self.mpnn(z, edge_fts, graph_fts,
-                           (adj_mat > 0.0).astype('float32'))
+    if self.kind == 'memnet_full' or self.kind == 'memnet_masked':
+      node_and_graph_fts = jnp.concatenate(
+          [node_fts, graph_fts[:, None]], axis=1)
+      edge_fts_padded = jnp.pad(edge_fts * adj_mat[..., None],
+                                ((0, 0), (0, 1), (0, 1), (0, 0)))
+      nxt_hidden = jax.vmap(self.memnet, (1), 1)(node_and_graph_fts,
+                                                 edge_fts_padded)
+      # Broadcast hidden state corresponding to graph features across the nodes.
+      nxt_hidden = nxt_hidden[:, :-1] + nxt_hidden[:, -1:]
+    else:
+      nxt_hidden = self.mpnn(z, edge_fts, graph_fts,
+                             (adj_mat > 0.0).astype('float32'))
+
     nxt_hidden = hk.dropout(hk.next_rng_key(), self._dropout_prob, nxt_hidden)
+
     if self.use_lstm:
       # lstm doesn't accept multiple batch dimensions (in our case, batch and
       # nodes), so we vmap over the (first) batch dimension.
       nxt_hidden, nxt_lstm_state = jax.vmap(self.lstm)(nxt_hidden, lstm_state)
     else:
       nxt_lstm_state = None
+
     h_t = jnp.concatenate([z, nxt_hidden], axis=-1)
 
     hint_preds = {}
