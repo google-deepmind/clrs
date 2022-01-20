@@ -15,6 +15,8 @@
 
 """Run a full test run for one or more algorithmic tasks from CLRS."""
 
+import os
+import shutil
 import time
 from absl import app
 from absl import flags
@@ -22,6 +24,7 @@ from absl import logging
 
 import clrs
 import jax
+import requests
 
 
 flags.DEFINE_string('algorithm', 'bfs', 'Which algorithm to run.')
@@ -59,11 +62,35 @@ flags.DEFINE_boolean('freeze_processor', False,
 
 FLAGS = flags.FLAGS
 
+CLRS_FILE_NAME = 'CLRS30.tar.gz'
+CLRS_FOLDER = 'CLRS30'
+DATASET_GCP_URL = f'https://storage.googleapis.com/dm-clrs/{CLRS_FILE_NAME}'
+
+
+def download_dataset():
+  """Downloads CLRS30 dataset."""
+  request = requests.get(DATASET_GCP_URL, allow_redirects=True)
+  clrs_file = os.path.join(FLAGS.dataset_path, CLRS_FILE_NAME)
+  os.makedirs(FLAGS.dataset_path)
+  open(clrs_file, 'wb').write(request.content)
+  shutil.unpack_archive(clrs_file, extract_dir=FLAGS.dataset_path)
+  extracted_folder = os.path.join(FLAGS.dataset_path, CLRS_FOLDER)
+  for file in os.listdir(extracted_folder):
+    shutil.move(os.path.join(extracted_folder, file),
+                os.path.join(FLAGS.dataset_path, file))
+  os.remove(clrs_file)
+  shutil.rmtree(extracted_folder)
+
 
 def main(unused_argv):
   # Use canonical CLRS-30 samplers.
   clrs30_spec = clrs.CLRS30
   logging.info('Using CLRS30 spec: %s', clrs30_spec)
+  clrs_dataset_path = os.path.join(FLAGS.dataset_path, 'clrs_dataset')
+  if not os.path.isdir(clrs_dataset_path):
+    logging.info('Dataset not found in %s. Downloading...', clrs_dataset_path)
+    download_dataset()
+
   train_sampler, spec = clrs.create_dataset(
       folder=FLAGS.dataset_path, algorithm=FLAGS.algorithm,
       split='train', batch_size=FLAGS.batch_size)

@@ -63,9 +63,7 @@ class CLRSDataset(tfds.core.GeneratorBasedBuilder):
   _instantiated_dataset_name = ''
   _instantiated_dataset_split = ''
 
-  def _create_data(self):
-    self._instantiated_dataset_name = self._builder_config.name
-    self._instantiated_dataset_split = self._builder_config.split
+  def _create_data(self, single_sample):
     algorithm_name = '_'.join(self._builder_config.name.split('_')[:-1])
     sampler, _ = samplers.build_sampler(
         algorithm_name,
@@ -73,7 +71,7 @@ class CLRSDataset(tfds.core.GeneratorBasedBuilder):
         num_samples=samplers.CLRS30[self._builder_config.split]['num_samples'],
         length=samplers.CLRS30[self._builder_config.split]['length'],
     )
-    sampled_dataset = sampler.next()
+    sampled_dataset = sampler.next(batch_size=1 if single_sample else None)
     data = {'input_' + t.name: t.data for t in sampled_dataset.features.inputs}
     # All other data points have input_, hint_, and output_ prefixes, so we
     # guarantee that this key is unused.
@@ -86,7 +84,7 @@ class CLRSDataset(tfds.core.GeneratorBasedBuilder):
   def _info(self) -> tfds.core.DatasetInfo:
     if (self._instantiated_dataset_name != self._builder_config.name
         or self._instantiated_dataset_split != self._builder_config.split):
-      self._create_data()
+      self._create_data(single_sample=True)
 
     data = {k: _correct_axis_filtering(v, 0, k)
             for k, v in self._instantiated_dataset.items()}
@@ -100,10 +98,11 @@ class CLRSDataset(tfds.core.GeneratorBasedBuilder):
 
   def _split_generators(self, dl_manager: tfds.download.DownloadManager):
     """Download the data and define splits."""
-    del dl_manager  # We are generating the dataset on the fly.
     if (self._instantiated_dataset_name != self._builder_config.name
         or self._instantiated_dataset_split != self._builder_config.split):
-      self._create_data()
+      self._create_data(single_sample=False)
+      self._instantiated_dataset_name = self._builder_config.name
+      self._instantiated_dataset_split = self._builder_config.split
     return {self._builder_config.split: self._generate_examples()}
 
   def _generate_examples(self):
