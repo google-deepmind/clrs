@@ -39,7 +39,7 @@ flags.DEFINE_boolean('verbose_logging', False, 'Whether to log aux losses.')
 flags.DEFINE_integer('hidden_size', 128,
                      'Number of hidden size units of the model.')
 flags.DEFINE_float('learning_rate', 0.003, 'Learning rate to use.')
-flags.DEFINE_float('dropout_prob', 0.1, 'Dropout rate to use.')
+flags.DEFINE_float('dropout_prob', 0.0, 'Dropout rate to use.')
 
 flags.DEFINE_boolean('encode_hints', True,
                      'Whether to provide hints as model inputs.')
