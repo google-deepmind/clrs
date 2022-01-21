@@ -25,6 +25,7 @@ from absl import logging
 import clrs
 import jax
 import requests
+import tensorflow as tf
 
 
 flags.DEFINE_string('algorithm', 'bfs', 'Which algorithm to run.')
@@ -91,14 +92,20 @@ def main(unused_argv):
     logging.info('Dataset not found in %s. Downloading...', clrs_dataset_path)
     download_dataset()
 
-  train_sampler, spec = clrs.create_dataset(
-      folder=FLAGS.dataset_path, algorithm=FLAGS.algorithm,
-      split='train', batch_size=FLAGS.batch_size)
-  train_sampler = train_sampler.as_numpy_iterator()
-  val_sampler, _ = clrs.create_dataset(
-      folder=FLAGS.dataset_path, algorithm=FLAGS.algorithm,
-      split='val', batch_size=FLAGS.batch_size)
-  val_sampler = val_sampler.as_numpy_iterator()
+  # Make full dataset pipeline run on CPU (including prefetching).
+  with tf.device('/cpu:0'):
+    train_sampler, spec = clrs.create_dataset(
+        folder=FLAGS.dataset_path, algorithm=FLAGS.algorithm,
+        split='train', batch_size=FLAGS.batch_size)
+    train_sampler = train_sampler.as_numpy_iterator()
+    val_sampler, _ = clrs.create_dataset(
+        folder=FLAGS.dataset_path, algorithm=FLAGS.algorithm,
+        split='val', batch_size=FLAGS.batch_size)
+    val_sampler = val_sampler.as_numpy_iterator()
+    test_sampler, _ = clrs.create_dataset(
+        folder=FLAGS.dataset_path, algorithm=FLAGS.algorithm,
+        split='test', batch_size=FLAGS.batch_size)
+    test_sampler = test_sampler.as_numpy_iterator()
 
   model = clrs.models.BaselineModel(
       spec=spec,
@@ -183,13 +190,10 @@ def main(unused_argv):
         model.save_model('best.pkl')
 
   # Training complete, evaluate on test set.
-  test_sampler, _ = clrs.create_dataset(
-      folder=FLAGS.dataset_path, algorithm=FLAGS.algorithm,
-      split='test', batch_size=FLAGS.batch_size)
   logging.info('Restoring best model from checkpoint...')
   model.restore_model('best.pkl', only_load_processor=False)
 
-  test_feedback = next(test_sampler.as_numpy_iterator())  # full-batch
+  test_feedback = next(test_sampler)  # full-batch
   rng_key, new_rng_key = jax.random.split(rng_key)
   test_stats = evaluate(
       rng_key, step, model, test_feedback, verbose=FLAGS.verbose_logging)
