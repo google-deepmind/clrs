@@ -51,7 +51,9 @@ flags.DEFINE_boolean('decode_diffs', True,
                      'Whether to predict masks within the model.')
 flags.DEFINE_enum(
     'processor_type', 'mpnn',
-    ['deepsets', 'mpnn', 'pgn', 'gat', 'memnet_full', 'memnet_masked'],
+    ['deepsets', 'mpnn', 'pgn', 'pgn_mask',
+     'gat', 'gatv2', 'gat_full', 'gatv2_full',
+     'memnet_full', 'memnet_masked'],
     'Whether to predict masks within the model.')
 
 flags.DEFINE_string('checkpoint_path', '/tmp/clrs3',

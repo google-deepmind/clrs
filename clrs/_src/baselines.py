@@ -377,7 +377,13 @@ class Net(hk.Module):
               self.hidden_dim,
               self.hidden_dim,
           ])
-    elif self.kind == 'gat':
+    elif self.kind in ['gat', 'gat_full']:
+      self.mpnn = processors.GAT(
+          out_size=self.hidden_dim,
+          nb_heads=1,
+          activation=jax.nn.relu,
+          residual=True)
+    elif self.kind in ['gatv2', 'gatv2_full']:
       self.mpnn = processors.GAT(
           out_size=self.hidden_dim,
           nb_heads=1,
@@ -482,10 +488,11 @@ class Net(hk.Module):
     if self.kind == 'deepsets':
       adj_mat = jnp.repeat(
           jnp.expand_dims(jnp.eye(nb_nodes), 0), self.batch_size, axis=0)
-    elif (self.kind == 'mpnn' or self.kind == 'gat' or
-          self.kind == 'memnet_full'):
+    elif (self.kind == 'mpnn' or self.kind == 'gat_full' or
+          self.kind == 'gatv2_full' or self.kind == 'memnet_full'):
       adj_mat = jnp.ones_like(adj_mat)
-    elif self.kind == 'pgn' or self.kind == 'memnet_masked':
+    elif (self.kind == 'pgn' or self.kind == 'gat' or self.kind == 'gatv2' or
+          self.kind == 'memnet_masked'):
       adj_mat = (adj_mat > 0.0) * 1.0
     else:
       raise ValueError('Unsupported kind of model')

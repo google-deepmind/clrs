@@ -100,6 +100,89 @@ class GAT(hk.Module):
     return ret
 
 
+class GATv2(hk.Module):
+  """Graph Attention Network v2 (Brody et al., ICLR 2022)."""
+
+  def __init__(
+      self,
+      out_size: int,
+      nb_heads: int,
+      mid_size: Optional[int] = None,
+      activation: Optional[_Fn] = None,
+      residual: bool = True,
+      name: str = 'gatv2_aggr',
+  ):
+    super().__init__(name=name)
+    if mid_size is None:
+      self.mid_size = out_size
+    else:
+      self.mid_size = mid_size
+    self.out_size = out_size
+    self.nb_heads = nb_heads
+    self.activation = activation
+    self.residual = residual
+
+  def __call__(
+      self,
+      features: _Array,
+      e_features: _Array,
+      g_features: _Array,
+      adj: _Array,
+  ) -> _Array:
+    """GATv2 inference step.
+
+    Args:
+      features: Node features.
+      e_features: Edge features.
+      g_features: Graph features.
+      adj: Graph adjacency matrix.
+
+    Returns:
+      Output of GATv2 inference step.
+    """
+    b, n, _ = features.shape
+    assert e_features.shape[:-1] == (b, n, n)
+    assert g_features.shape[:-1] == (b,)
+    assert adj.shape == (b, n, n)
+
+    m = hk.Linear(self.out_size)
+    skip = hk.Linear(self.out_size)
+
+    bias_mat = (adj - 1.0) * 1e9
+
+    w_1 = hk.Linear(self.mid_size)
+    w_2 = hk.Linear(self.mid_size)
+    w_e = hk.Linear(self.mid_size)
+    w_g = hk.Linear(self.mid_size)
+
+    a = hk.Linear(1)
+
+    values = m(features)
+
+    pre_att_1 = w_1(features)
+    pre_att_2 = w_2(features)
+    pre_att_e = w_e(e_features)
+    pre_att_g = w_g(g_features)
+
+    pre_att = (
+        jnp.expand_dims(pre_att_1, axis=1) + jnp.expand_dims(
+            pre_att_2, axis=2) + pre_att_e + jnp.expand_dims(
+                pre_att_g, axis=(1, 2)))
+
+    logits = jnp.squeeze(a(jax.nn.leaky_relu(pre_att)), axis=-1)
+
+    coefs = jax.nn.softmax(logits + bias_mat, axis=-1)
+    ret = jnp.matmul(coefs, values)
+
+    if self.residual:
+      ret += skip(features)
+
+    if self.activation is not None:
+      ret = self.activation(ret)
+
+    return ret
+
+
 class MPNN(hk.Module):
   """Message-Passing Neural Network (Gilmer et al., ICML 2017)."""
 
