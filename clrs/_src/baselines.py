@@ -395,9 +395,8 @@ class Net(hk.Module):
           embedding_size=self.hidden_dim,
           sentence_size=self.hidden_dim,
           linear_output_size=self.hidden_dim,
-          memory_size=self.nb_dims['adj'] + 1,
           num_hops=1,
-          apply_embeddings=True)
+          apply_embeddings=False)
 
   def _one_step_pred(
       self,

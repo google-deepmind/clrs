@@ -293,7 +293,7 @@ class MemNet(hk.Module):
       embedding_size: int,
       sentence_size: int,
       linear_output_size: int,
-      memory_size: Optional[int] = None,
+      memory_size: Optional[int] = 128,
       num_hops: int = 1,
       nonlin: Callable[[Any], Any] = jax.nn.relu,
       apply_embeddings: bool = True,
@@ -365,6 +365,10 @@ class MemNet(hk.Module):
       memory_embeddings = jnp.take(
           stories_biases, stories.reshape([-1]).astype(jnp.int32),
           axis=0).reshape(list(stories.shape) + [self._embedding_size])
+      memory_embeddings = jnp.pad(
+          memory_embeddings,
+          ((0, 0), (0, self._memory_size - jnp.shape(memory_embeddings)[1]),
+           (0, 0), (0, 0)))
       memory = jnp.sum(memory_embeddings * self._encodings, 2) + memory_biases
     else:
       memory = stories
