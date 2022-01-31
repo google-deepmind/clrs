@@ -23,6 +23,8 @@ from typing import Dict, Tuple, List, Optional
 
 import chex
 
+from clrs._src import decoders
+from clrs._src import encoders
 from clrs._src import model
 from clrs._src import probing
 from clrs._src import processors
@@ -261,109 +263,39 @@ class Net(hk.Module):
     """Constructs encoders and decoders."""
     self.enc_inp = {}
     self.dec_out = {}
+
     if self.encode_hints:
       self.enc_hint = {}
-    if self.decode_diffs:
-      self.node_dec_diff = hk.Linear(1)
-      self.edge_dec_diff = (hk.Linear(1), hk.Linear(1), hk.Linear(1))
-      self.graph_dec_diff = (hk.Linear(1), hk.Linear(1))
+
     if self.decode_hints:
       self.dec_hint = {}
 
-    for name in self.spec:
-      stage, loc, t = self.spec[name]
+    for name, (stage, loc, t) in self.spec.items():
       if stage == _Stage.INPUT:
-        self.enc_inp[name] = [hk.Linear(self.hidden_dim)]
-        if loc == _Location.EDGE and t == _Type.POINTER:
-          # Edge pointers need two-way encoders
-          self.enc_inp[name].append(hk.Linear(self.hidden_dim))
+        # Build input encoders.
+        self.enc_inp[name] = encoders.construct_encoder(
+            loc, t, hidden_dim=self.hidden_dim)
 
       elif stage == _Stage.OUTPUT:
-        if loc == _Location.NODE:
-          if t in [_Type.SCALAR, _Type.MASK, _Type.MASK_ONE]:
-            self.dec_out[name] = (hk.Linear(1),)
-          elif t == _Type.CATEGORICAL:
-            self.dec_out[name] = (hk.Linear(self.nb_dims[name]),)
-          elif t == _Type.POINTER:
-            self.dec_out[name] = (hk.Linear(self.hidden_dim),
-                                  hk.Linear(self.hidden_dim))
-          else:
-            raise ValueError('Incorrect type')
-        elif loc == _Location.EDGE:
-          if t in [_Type.SCALAR, _Type.MASK, _Type.MASK_ONE]:
-            self.dec_out[name] = (hk.Linear(1), hk.Linear(1), hk.Linear(1))
-          elif t == _Type.CATEGORICAL:
-            cat_dims = self.nb_dims[name]
-            self.dec_out[name] = (hk.Linear(cat_dims), hk.Linear(cat_dims),
-                                  hk.Linear(cat_dims))
-          elif t == _Type.POINTER:
-            self.dec_out[name] = (hk.Linear(self.hidden_dim),
-                                  hk.Linear(self.hidden_dim),
-                                  hk.Linear(self.hidden_dim),
-                                  hk.Linear(self.hidden_dim))
-          else:
-            raise ValueError('Incorrect type')
-        elif loc == _Location.GRAPH:
-          if t in [_Type.SCALAR, _Type.MASK, _Type.MASK_ONE]:
-            self.dec_out[name] = (hk.Linear(1), hk.Linear(1))
-          elif t == _Type.CATEGORICAL:
-            cat_dims = self.nb_dims[name]
-            self.dec_out[name] = (hk.Linear(cat_dims), hk.Linear(cat_dims))
-          elif t == _Type.POINTER:
-            self.dec_out[name] = (hk.Linear(self.hidden_dim),
-                                  hk.Linear(self.hidden_dim),
-                                  hk.Linear(self.hidden_dim))
-          else:
-            raise ValueError('Incorrect type')
-        else:
-          raise ValueError('Incorrect location')
+        # Build output decoders.
+        self.dec_out[name] = decoders.construct_decoder(
+            loc, t, hidden_dim=self.hidden_dim, nb_dims=self.nb_dims[name])
 
       elif stage == _Stage.HINT:
+        # Optionally build hint encoder/decoders.
         if self.encode_hints:
-          self.enc_hint[name] = [hk.Linear(self.hidden_dim)]
-          if loc == _Location.EDGE and t == _Type.POINTER:
-            # Edge pointers need two-way encoders
-            self.enc_hint[name].append(hk.Linear(self.hidden_dim))
+          self.enc_hint[name] = encoders.construct_encoder(
+              loc, t, hidden_dim=self.hidden_dim)
 
         if self.decode_hints:
-          if loc == _Location.NODE:
-            if t in [_Type.SCALAR, _Type.MASK, _Type.MASK_ONE]:
-              self.dec_hint[name] = (hk.Linear(1),)
-            elif t == _Type.CATEGORICAL:
-              self.dec_hint[name] = (hk.Linear(self.nb_dims[name]),)
-            elif t == _Type.POINTER:
-              self.dec_hint[name] = (hk.Linear(self.hidden_dim),
-                                     hk.Linear(self.hidden_dim))
-            else:
-              raise ValueError('Incorrect type')
-          elif loc == _Location.EDGE:
-            if t in [_Type.SCALAR, _Type.MASK, _Type.MASK_ONE]:
-              self.dec_hint[name] = (hk.Linear(1), hk.Linear(1), hk.Linear(1))
-            elif t == _Type.CATEGORICAL:
-              cat_dims = self.nb_dims[name]
-              self.dec_hint[name] = (hk.Linear(cat_dims), hk.Linear(cat_dims),
-                                     hk.Linear(cat_dims))
-            elif t == _Type.POINTER:
-              self.dec_hint[name] = (hk.Linear(self.hidden_dim),
-                                     hk.Linear(self.hidden_dim),
-                                     hk.Linear(self.hidden_dim),
-                                     hk.Linear(self.hidden_dim))
-            else:
-              raise ValueError('Incorrect type')
-          elif loc == _Location.GRAPH:
-            if t in [_Type.SCALAR, _Type.MASK, _Type.MASK_ONE]:
-              self.dec_hint[name] = (hk.Linear(1), hk.Linear(1))
-            elif t == _Type.CATEGORICAL:
-              cat_dims = self.nb_dims[name]
-              self.dec_hint[name] = (hk.Linear(cat_dims), hk.Linear(cat_dims))
-            elif t == _Type.POINTER:
-              self.dec_hint[name] = (hk.Linear(self.hidden_dim),
-                                     hk.Linear(self.hidden_dim),
-                                     hk.Linear(self.hidden_dim))
-            else:
-              raise ValueError('Incorrect type')
-          else:
-            raise ValueError('Incorrect location')
+          self.dec_hint[name] = decoders.construct_decoder(
+              loc, t, hidden_dim=self.hidden_dim, nb_dims=self.nb_dims[name])
+
+    if self.decode_diffs:
+      # Optionally build diff encoder/decoders.
+      self.node_dec_diff = hk.Linear(1)
+      self.edge_dec_diff = (hk.Linear(1), hk.Linear(1), hk.Linear(1))
+      self.graph_dec_diff = (hk.Linear(1), hk.Linear(1))
 
   def _construct_processor(self):
     """Constructs processor."""
@@ -546,18 +478,18 @@ class Net(hk.Module):
 
     if self.decode_hints:
       for hint in hints:
-        decoders = self.dec_hint[hint.name]
+        decoder = self.dec_hint[hint.name]
 
         if hint.location == _Location.NODE:
           if hint.type_ in [
               _Type.SCALAR, _Type.MASK, _Type.MASK_ONE
           ]:
-            hint_preds[hint.name] = jnp.squeeze(decoders[0](h_t), -1)
+            hint_preds[hint.name] = jnp.squeeze(decoder[0](h_t), -1)
           elif hint.type_ == _Type.CATEGORICAL:
-            hint_preds[hint.name] = decoders[0](h_t)
+            hint_preds[hint.name] = decoder[0](h_t)
           elif hint.type_ == _Type.POINTER:
-            p_1 = decoders[0](h_t)
-            p_2 = decoders[1](h_t)
+            p_1 = decoder[0](h_t)
+            p_2 = decoder[1](h_t)
             ptr_p = jnp.matmul(p_1, jnp.transpose(p_2, (0, 2, 1)))
             hint_preds[hint.name] = ptr_p
             if self.inf_bias:
@@ -565,9 +497,9 @@ class Net(hk.Module):
           else:
             raise ValueError('Invalid hint type')
         elif hint.location == _Location.EDGE:
-          pred_1 = decoders[0](h_t)
-          pred_2 = decoders[1](h_t)
-          pred_e = decoders[2](edge_fts)
+          pred_1 = decoder[0](h_t)
+          pred_2 = decoder[1](h_t)
+          pred_e = decoder[2](edge_fts)
           pred = (
               jnp.expand_dims(pred_1, -2) + jnp.expand_dims(pred_2, -3) +
               pred_e)
@@ -578,7 +510,7 @@ class Net(hk.Module):
           elif hint.type_ == _Type.CATEGORICAL:
             hint_preds[hint.name] = pred
           elif hint.type_ == _Type.POINTER:
-            pred_2 = jnp.expand_dims(decoders[3](h_t), -1)
+            pred_2 = jnp.expand_dims(decoder[3](h_t), -1)
             ptr_p = jnp.matmul(pred, jnp.transpose(pred_2, (0, 3, 2, 1)))
             hint_preds[hint.name] = ptr_p
           else:
@@ -589,8 +521,8 @@ class Net(hk.Module):
             hint_preds[hint.name] -= (1 - adj_mat) * _BIG_NUMBER
         elif hint.location == _Location.GRAPH:
           gr_emb = jnp.max(h_t, axis=-2)
-          pred_n = decoders[0](gr_emb)
-          pred_g = decoders[1](graph_fts)
+          pred_n = decoder[0](gr_emb)
+          pred_g = decoder[1](graph_fts)
           pred = pred_n + pred_g
           if hint.type_ in [
               _Type.SCALAR, _Type.MASK, _Type.MASK_ONE
@@ -599,7 +531,7 @@ class Net(hk.Module):
           elif hint.type_ == _Type.CATEGORICAL:
             hint_preds[hint.name] = pred
           elif hint.type_ == _Type.POINTER:
-            pred_2 = decoders[2](h_t)
+            pred_2 = decoder[2](h_t)
             ptr_p = jnp.matmul(
                 jnp.expand_dims(pred, 1), jnp.transpose(pred_2, (0, 2, 1)))
             hint_preds[hint.name] = jnp.squeeze(ptr_p, 1)
@@ -607,18 +539,18 @@ class Net(hk.Module):
             raise ValueError('Invalid hint type')
 
     for out_name in self.dec_out:
-      decoders = self.dec_out[out_name]
+      decoder = self.dec_out[out_name]
       _, out_location, out_type = self.spec[out_name]
       if out_location == _Location.NODE:
         if out_type in [
             _Type.SCALAR, _Type.MASK, _Type.MASK_ONE
         ]:
-          output_preds[out_name] = jnp.squeeze(decoders[0](h_t), -1)
+          output_preds[out_name] = jnp.squeeze(decoder[0](h_t), -1)
         elif out_type == _Type.CATEGORICAL:
-          output_preds[out_name] = decoders[0](h_t)
+          output_preds[out_name] = decoder[0](h_t)
         elif out_type == _Type.POINTER:
-          p_1 = decoders[0](h_t)
-          p_2 = decoders[1](h_t)
+          p_1 = decoder[0](h_t)
+          p_2 = decoder[1](h_t)
           ptr_p = jnp.matmul(p_1, jnp.transpose(p_2, (0, 2, 1)))
           output_preds[out_name] = ptr_p
           if self.inf_bias:
@@ -626,9 +558,9 @@ class Net(hk.Module):
         else:
           raise ValueError('Invalid output type')
       elif out_location == _Location.EDGE:
-        pred_1 = decoders[0](h_t)
-        pred_2 = decoders[1](h_t)
-        pred_e = decoders[2](edge_fts)
+        pred_1 = decoder[0](h_t)
+        pred_2 = decoder[1](h_t)
+        pred_e = decoder[2](edge_fts)
         pred = (
             jnp.expand_dims(pred_1, -2) + jnp.expand_dims(pred_2, -3) + pred_e)
         if out_type in [
@@ -638,7 +570,7 @@ class Net(hk.Module):
         elif out_type == _Type.CATEGORICAL:
           output_preds[out_name] = pred
         elif out_type == _Type.POINTER:
-          pred_2 = jnp.expand_dims(decoders[3](h_t), -1)
+          pred_2 = jnp.expand_dims(decoder[3](h_t), -1)
           ptr_p = jnp.matmul(pred, jnp.transpose(pred_2, (0, 3, 2, 1)))
           output_preds[out_name] = ptr_p
         else:
@@ -647,8 +579,8 @@ class Net(hk.Module):
           output_preds[out_name] -= (1 - adj_mat) * _BIG_NUMBER
       elif out_location == _Location.GRAPH:
         gr_emb = jnp.max(h_t, axis=-2)
-        pred_n = decoders[0](gr_emb)
-        pred_g = decoders[1](graph_fts)
+        pred_n = decoder[0](gr_emb)
+        pred_g = decoder[1](graph_fts)
         pred = pred_n + pred_g
         if out_type in [
             _Type.SCALAR, _Type.MASK, _Type.MASK_ONE
@@ -657,7 +589,7 @@ class Net(hk.Module):
         elif out_type == _Type.CATEGORICAL:
           output_preds[out_name] = pred
         elif out_type == _Type.POINTER:
-          pred_2 = decoders[2](h_t)
+          pred_2 = decoder[2](h_t)
           ptr_p = jnp.matmul(
               jnp.expand_dims(pred, 1), jnp.transpose(pred_2, (0, 2, 1)))
           output_preds[out_name] = jnp.squeeze(ptr_p, 1)
