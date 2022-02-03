@@ -37,8 +37,6 @@ import jax.numpy as jnp
 import optax
 
 
-_BIG_NUMBER = 1e5
-
 _Array = chex.Array
 _DataPoint = probing.DataPoint
 _Features = samplers.Features
@@ -112,7 +110,7 @@ class Net(hk.Module):
                         inputs: _Trajectory,
                         first_step: bool = False):
     if (not first_step) and repred and self.decode_hints:
-      decoded_hint = _decode_from_preds(self.spec, mp_state.hint_preds)
+      decoded_hint = decoders.postprocess(self.spec, mp_state.hint_preds)
       cur_hint = []
       for hint in decoded_hint:
         cur_hint.append(decoded_hint[hint])
@@ -262,31 +260,18 @@ class Net(hk.Module):
   def _construct_encoders_decoders(self):
     """Constructs encoders and decoders."""
     self.encoders = {}
-    self.dec_out = {}
-
-    if self.decode_hints:
-      self.dec_hint = {}
+    self.decoders = {}
 
     for name, (stage, loc, t) in self.spec.items():
-      if stage == _Stage.INPUT:
+      if stage == _Stage.INPUT or (stage == _Stage.HINT and self.encode_hints):
         # Build input encoders.
         self.encoders[name] = encoders.construct_encoders(
             loc, t, hidden_dim=self.hidden_dim)
 
-      elif stage == _Stage.OUTPUT:
+      if stage == _Stage.OUTPUT or (stage == _Stage.HINT and self.decode_hints):
         # Build output decoders.
-        self.dec_out[name] = decoders.construct_decoder(
+        self.decoders[name] = decoders.construct_decoders(
             loc, t, hidden_dim=self.hidden_dim, nb_dims=self.nb_dims[name])
-
-      elif stage == _Stage.HINT:
-        # Optionally build hint encoder/decoders.
-        if self.encode_hints:
-          self.encoders[name] = encoders.construct_encoders(
-              loc, t, hidden_dim=self.hidden_dim)
-
-        if self.decode_hints:
-          self.dec_hint[name] = decoders.construct_decoder(
-              loc, t, hidden_dim=self.hidden_dim, nb_dims=self.nb_dims[name])
 
     if self.decode_diffs:
       # Optionally build diff encoder/decoders.
@@ -345,6 +330,8 @@ class Net(hk.Module):
     adj_mat = jnp.repeat(
         jnp.expand_dims(jnp.eye(nb_nodes), 0), self.batch_size, axis=0)
 
+    # ENCODE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
     # Encode node/edge/graph features from inputs and (optionally) hints.
     trajectories = [inputs]
     if self.encode_hints:
@@ -361,6 +348,8 @@ class Net(hk.Module):
           graph_fts = encoders.accum_graph_fts(encoder, dp, data, graph_fts)
         except Exception as e:
           raise Exception(f'Failed to process {dp}') from e
+
+    # PROCESS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     if self.kind == 'deepsets':
       adj_mat = jnp.repeat(
@@ -399,6 +388,7 @@ class Net(hk.Module):
 
     h_t = jnp.concatenate([z, nxt_hidden], axis=-1)
 
+    # DECODE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     hint_preds = {}
     output_preds = {}
     diff_preds = {}
@@ -422,125 +412,29 @@ class Net(hk.Module):
           _Location.GRAPH: jnp.ones((self.batch_size))
       }
 
-    if self.decode_hints:
-      for hint in hints:
-        decoder = self.dec_hint[hint.name]
+    # Decode features and (optionally) hints.
+    for name in self.decoders:
+      decoder = self.decoders[name]
+      stage, loc, t = self.spec[name]
 
-        if hint.location == _Location.NODE:
-          if hint.type_ in [
-              _Type.SCALAR, _Type.MASK, _Type.MASK_ONE
-          ]:
-            hint_preds[hint.name] = jnp.squeeze(decoder[0](h_t), -1)
-          elif hint.type_ == _Type.CATEGORICAL:
-            hint_preds[hint.name] = decoder[0](h_t)
-          elif hint.type_ == _Type.POINTER:
-            p_1 = decoder[0](h_t)
-            p_2 = decoder[1](h_t)
-            ptr_p = jnp.matmul(p_1, jnp.transpose(p_2, (0, 2, 1)))
-            hint_preds[hint.name] = ptr_p
-            if self.inf_bias:
-              hint_preds[hint.name] -= (1 - adj_mat) * _BIG_NUMBER
-          else:
-            raise ValueError('Invalid hint type')
-        elif hint.location == _Location.EDGE:
-          pred_1 = decoder[0](h_t)
-          pred_2 = decoder[1](h_t)
-          pred_e = decoder[2](edge_fts)
-          pred = (
-              jnp.expand_dims(pred_1, -2) + jnp.expand_dims(pred_2, -3) +
-              pred_e)
-          if hint.type_ in [
-              _Type.SCALAR, _Type.MASK, _Type.MASK_ONE
-          ]:
-            hint_preds[hint.name] = jnp.squeeze(pred, -1)
-          elif hint.type_ == _Type.CATEGORICAL:
-            hint_preds[hint.name] = pred
-          elif hint.type_ == _Type.POINTER:
-            pred_2 = jnp.expand_dims(decoder[3](h_t), -1)
-            ptr_p = jnp.matmul(pred, jnp.transpose(pred_2, (0, 3, 2, 1)))
-            hint_preds[hint.name] = ptr_p
-          else:
-            raise ValueError('Invalid hint type')
-          if self.inf_bias_edge and hint.type_ in [
-              _Type.MASK, _Type.MASK_ONE
-          ]:
-            hint_preds[hint.name] -= (1 - adj_mat) * _BIG_NUMBER
-        elif hint.location == _Location.GRAPH:
-          gr_emb = jnp.max(h_t, axis=-2)
-          pred_n = decoder[0](gr_emb)
-          pred_g = decoder[1](graph_fts)
-          pred = pred_n + pred_g
-          if hint.type_ in [
-              _Type.SCALAR, _Type.MASK, _Type.MASK_ONE
-          ]:
-            hint_preds[hint.name] = jnp.squeeze(pred, -1)
-          elif hint.type_ == _Type.CATEGORICAL:
-            hint_preds[hint.name] = pred
-          elif hint.type_ == _Type.POINTER:
-            pred_2 = decoder[2](h_t)
-            ptr_p = jnp.matmul(
-                jnp.expand_dims(pred, 1), jnp.transpose(pred_2, (0, 2, 1)))
-            hint_preds[hint.name] = jnp.squeeze(ptr_p, 1)
-          else:
-            raise ValueError('Invalid hint type')
+      if loc == _Location.NODE:
+        preds = decoders.decode_node_fts(decoder, t, h_t, adj_mat,
+                                         self.inf_bias)
+      elif loc == _Location.EDGE:
+        preds = decoders.decode_edge_fts(decoder, t, h_t, edge_fts, adj_mat,
+                                         self.inf_bias_edge)
+      elif loc == _Location.GRAPH:
+        preds = decoders.decode_graph_fts(decoder, t, h_t, graph_fts)
+      else:
+        raise ValueError('Invalid output type')
 
-    for out_name in self.dec_out:
-      decoder = self.dec_out[out_name]
-      _, out_location, out_type = self.spec[out_name]
-      if out_location == _Location.NODE:
-        if out_type in [
-            _Type.SCALAR, _Type.MASK, _Type.MASK_ONE
-        ]:
-          output_preds[out_name] = jnp.squeeze(decoder[0](h_t), -1)
-        elif out_type == _Type.CATEGORICAL:
-          output_preds[out_name] = decoder[0](h_t)
-        elif out_type == _Type.POINTER:
-          p_1 = decoder[0](h_t)
-          p_2 = decoder[1](h_t)
-          ptr_p = jnp.matmul(p_1, jnp.transpose(p_2, (0, 2, 1)))
-          output_preds[out_name] = ptr_p
-          if self.inf_bias:
-            output_preds[out_name] -= (1 - adj_mat) * _BIG_NUMBER
-        else:
-          raise ValueError('Invalid output type')
-      elif out_location == _Location.EDGE:
-        pred_1 = decoder[0](h_t)
-        pred_2 = decoder[1](h_t)
-        pred_e = decoder[2](edge_fts)
-        pred = (
-            jnp.expand_dims(pred_1, -2) + jnp.expand_dims(pred_2, -3) + pred_e)
-        if out_type in [
-            _Type.SCALAR, _Type.MASK, _Type.MASK_ONE
-        ]:
-          output_preds[out_name] = jnp.squeeze(pred, -1)
-        elif out_type == _Type.CATEGORICAL:
-          output_preds[out_name] = pred
-        elif out_type == _Type.POINTER:
-          pred_2 = jnp.expand_dims(decoder[3](h_t), -1)
-          ptr_p = jnp.matmul(pred, jnp.transpose(pred_2, (0, 3, 2, 1)))
-          output_preds[out_name] = ptr_p
-        else:
-          raise ValueError('Invalid output type')
-        if self.inf_bias_edge and out_type in [_Type.MASK, _Type.MASK_ONE]:
-          output_preds[out_name] -= (1 - adj_mat) * _BIG_NUMBER
-      elif out_location == _Location.GRAPH:
-        gr_emb = jnp.max(h_t, axis=-2)
-        pred_n = decoder[0](gr_emb)
-        pred_g = decoder[1](graph_fts)
-        pred = pred_n + pred_g
-        if out_type in [
-            _Type.SCALAR, _Type.MASK, _Type.MASK_ONE
-        ]:
-          output_preds[out_name] = jnp.squeeze(pred, -1)
-        elif out_type == _Type.CATEGORICAL:
-          output_preds[out_name] = pred
-        elif out_type == _Type.POINTER:
-          pred_2 = decoder[2](h_t)
-          ptr_p = jnp.matmul(
-              jnp.expand_dims(pred, 1), jnp.transpose(pred_2, (0, 2, 1)))
-          output_preds[out_name] = jnp.squeeze(ptr_p, 1)
-        else:
-          raise ValueError('Invalid output type')
+      if stage == _Stage.OUTPUT:
+        output_preds[name] = preds
+      elif stage == _Stage.HINT:
+        assert self.decode_hints
+        hint_preds[name] = preds
+      else:
+        raise ValueError(f'Found unexpected decoder {name}')
 
     return nxt_hidden, output_preds, hint_preds, diff_preds, nxt_lstm_state
 
@@ -617,8 +511,8 @@ class BaselineModel(model.Model):
     """Model inference step."""
     outs, hint_preds, diff_logits, gt_diff = self.net_fn_apply(
         self.params, rng_key, features, True)
-    return _decode_from_preds(self.spec,
-                              outs), (hint_preds, diff_logits, gt_diff)
+    return decoders.postprocess(self.spec,
+                                outs), (hint_preds, diff_logits, gt_diff)
 
   def update(
       self,
@@ -864,29 +758,6 @@ class BaselineModel(model.Model):
     path = os.path.join(self.checkpoint_path, file_name)
     with open(path, 'wb') as f:
       pickle.dump(to_save, f)
-
-
-def _decode_from_preds(spec: _Spec, preds: _Array) -> Dict[str, _DataPoint]:
-  """Decodes outputs using appropriate functions depending on algorithm spec."""
-  result = {}
-  for name in preds.keys():
-    _, loc, typ = spec[name]
-    data = preds[name]
-    if typ == _Type.SCALAR:
-      pass
-    elif typ == _Type.MASK:
-      data = (data > 0.0) * 1.0
-    elif typ in [_Type.MASK_ONE, _Type.CATEGORICAL]:
-      cat_size = data.shape[-1]
-      best = jnp.argmax(data, -1)
-      data = hk.one_hot(best, cat_size)
-    elif typ == _Type.POINTER:
-      data = jnp.argmax(data, -1)
-    else:
-      raise ValueError('Invalid type')
-    result[name] = probing.DataPoint(
-        name=name, location=loc, type_=typ, data=data)
-  return result
 
 
 def _filter_processor(params: hk.Params) -> hk.Params:

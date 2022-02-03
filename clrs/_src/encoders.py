@@ -28,7 +28,7 @@ _Type = specs.Type
 
 
 def construct_encoders(loc: str, t: str, hidden_dim: int):
-  """Constructs an encoder."""
+  """Constructs encoders."""
   encoders = [hk.Linear(hidden_dim)]
   if loc == _Location.EDGE and t == _Type.POINTER:
     # Edge pointers need two-way encoders.
