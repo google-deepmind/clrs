@@ -261,11 +261,8 @@ class Net(hk.Module):
 
   def _construct_encoders_decoders(self):
     """Constructs encoders and decoders."""
-    self.enc_inp = {}
+    self.encoders = {}
     self.dec_out = {}
-
-    if self.encode_hints:
-      self.enc_hint = {}
 
     if self.decode_hints:
       self.dec_hint = {}
@@ -273,7 +270,7 @@ class Net(hk.Module):
     for name, (stage, loc, t) in self.spec.items():
       if stage == _Stage.INPUT:
         # Build input encoders.
-        self.enc_inp[name] = encoders.construct_encoder(
+        self.encoders[name] = encoders.construct_encoders(
             loc, t, hidden_dim=self.hidden_dim)
 
       elif stage == _Stage.OUTPUT:
@@ -284,7 +281,7 @@ class Net(hk.Module):
       elif stage == _Stage.HINT:
         # Optionally build hint encoder/decoders.
         if self.encode_hints:
-          self.enc_hint[name] = encoders.construct_encoder(
+          self.encoders[name] = encoders.construct_encoders(
               loc, t, hidden_dim=self.hidden_dim)
 
         if self.decode_hints:
@@ -299,6 +296,7 @@ class Net(hk.Module):
 
   def _construct_processor(self):
     """Constructs processor."""
+
     if self.kind in ['deepsets', 'mpnn', 'pgn']:
       self.mpnn = processors.MPNN(
           out_size=self.hidden_dim,
@@ -338,83 +336,31 @@ class Net(hk.Module):
       nb_nodes: int,
       lstm_state: Optional[hk.LSTMState],
   ):
-    """Generates one step predictions."""
+    """Generates one-step predictions."""
 
+    # Initialise empty node/edge/graph features and adjacency matrix.
     node_fts = jnp.zeros((self.batch_size, nb_nodes, self.hidden_dim))
     edge_fts = jnp.zeros((self.batch_size, nb_nodes, nb_nodes, self.hidden_dim))
     graph_fts = jnp.zeros((self.batch_size, self.hidden_dim))
     adj_mat = jnp.repeat(
         jnp.expand_dims(jnp.eye(nb_nodes), 0), self.batch_size, axis=0)
 
-    for inp in inputs:
-      # Extract shared logic with hints and loss
-      encoder = self.enc_inp[inp.name][0]
-      if inp.type_ == _Type.POINTER:
-        in_data = hk.one_hot(inp.data, nb_nodes)
-      else:
-        in_data = inp.data.astype(jnp.float32)
-      if inp.type_ == _Type.CATEGORICAL:
-        encoding = encoder(in_data)
-      else:
-        encoding = encoder(jnp.expand_dims(in_data, -1))
-      if inp.location == _Location.NODE:
-        if inp.type_ == _Type.POINTER:
-          edge_fts += encoding
-          adj_mat += ((in_data + jnp.transpose(in_data, (0, 2, 1))) >
-                      0.0).astype('float32')
-        else:
-          node_fts += encoding
-      elif inp.location == _Location.EDGE:
-        if inp.type_ == _Type.POINTER:
-          # Aggregate pointer contributions across sender and receiver nodes
-          encoding_2 = self.enc_inp[inp.name][1](jnp.expand_dims(in_data, -1))
-          edge_fts += jnp.mean(encoding, axis=1) + jnp.mean(encoding_2, axis=2)
-        else:
-          edge_fts += encoding
-          if inp.type_ == _Type.MASK:
-            adj_mat += (in_data > 0.0).astype('float32')
-      elif inp.location == _Location.GRAPH:
-        if inp.type_ == _Type.POINTER:
-          node_fts += encoding
-        else:
-          graph_fts += encoding
-
+    # Encode node/edge/graph features from inputs and (optionally) hints.
+    trajectories = [inputs]
     if self.encode_hints:
-      for hint in hints:
-        encoder = self.enc_hint[hint.name][0]
-        if hint.type_ == _Type.POINTER:
-          in_data = hk.one_hot(hint.data, nb_nodes)
-        else:
-          in_data = hint.data.astype(jnp.float32)
-        if hint.type_ == _Type.CATEGORICAL:
-          encoding = encoder(in_data)
-        else:
-          encoding = encoder(jnp.expand_dims(in_data, -1))
-        if hint.location == _Location.NODE:
-          if hint.type_ == _Type.POINTER:
-            edge_fts += encoding
-            adj_mat += ((in_data + jnp.transpose(in_data, (0, 2, 1))) >
-                        0.0).astype('float32')
-          else:
-            node_fts += encoding
-        elif hint.location == _Location.EDGE:
-          if hint.type_ == _Type.POINTER:
-            # Aggregate pointer contributions across sender and receiver nodes
-            encoding_2 = self.enc_hint[hint.name][1](
-                jnp.expand_dims(in_data, -1))
-            edge_fts += jnp.mean(encoding, axis=1) + jnp.mean(
-                encoding_2, axis=2)
-          else:
-            edge_fts += encoding
-            if hint.type_ == _Type.MASK:
-              adj_mat += (in_data > 0.0).astype('float32')
-        elif hint.location == _Location.GRAPH:
-          if hint.type_ == _Type.POINTER:
-            node_fts += encoding
-          else:
-            graph_fts += encoding
-        else:
-          raise ValueError('Invalid hint location')
+      trajectories.append(hints)
+
+    for trajectory in trajectories:
+      for dp in trajectory:
+        try:
+          data = encoders.preprocess(dp, nb_nodes)
+          adj_mat = encoders.accum_adj_mat(dp, data, adj_mat)
+          encoder = self.encoders[dp.name]
+          edge_fts = encoders.accum_edge_fts(encoder, dp, data, edge_fts)
+          node_fts = encoders.accum_node_fts(encoder, dp, data, node_fts)
+          graph_fts = encoders.accum_graph_fts(encoder, dp, data, graph_fts)
+        except Exception as e:
+          raise Exception(f'Failed to process {dp}') from e
 
     if self.kind == 'deepsets':
       adj_mat = jnp.repeat(

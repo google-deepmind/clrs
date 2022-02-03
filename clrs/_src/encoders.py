@@ -12,23 +12,96 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-
 """Encoder utilities."""
 
+import chex
+from clrs._src import probing
 from clrs._src import specs
 import haiku as hk
+import jax.numpy as jnp
 
-
+_Array = chex.Array
+_DataPoint = probing.DataPoint
 _Location = specs.Location
 _Spec = specs.Spec
 _Type = specs.Type
 
 
-def construct_encoder(loc: str, t: str, hidden_dim: int):
+def construct_encoders(loc: str, t: str, hidden_dim: int):
   """Constructs an encoder."""
-  encoder = [hk.Linear(hidden_dim)]
+  encoders = [hk.Linear(hidden_dim)]
   if loc == _Location.EDGE and t == _Type.POINTER:
     # Edge pointers need two-way encoders.
-    encoder.append(hk.Linear(hidden_dim))
+    encoders.append(hk.Linear(hidden_dim))
 
-  return encoder
+  return encoders
+
+
+def preprocess(dp: _DataPoint, nb_nodes: int) -> _Array:
+  """Pre-process data point."""
+  if dp.type_ == _Type.POINTER:
+    data = hk.one_hot(dp.data, nb_nodes)
+  else:
+    data = dp.data.astype(jnp.float32)
+
+  return data
+
+
+def accum_adj_mat(dp: _DataPoint, data: _Array, adj_mat: _Array) -> _Array:
+  """Accumulates adjacency matrix."""
+  if dp.location == _Location.NODE and dp.type_ == _Type.POINTER:
+    adj_mat += ((data + jnp.transpose(data, (0, 2, 1))) > 0.0).astype('float32')
+  elif dp.location == _Location.EDGE and dp.type_ == _Type.MASK:
+    adj_mat += (data > 0.0).astype('float32')
+
+  return adj_mat
+
+
+def accum_edge_fts(encoders, dp: _DataPoint, data: _Array,
+                   edge_fts: _Array) -> _Array:
+  """Encodes and accumulates edge features."""
+  encoding = _encode_inputs(encoders, dp, data)
+
+  if dp.location == _Location.NODE and dp.type_ == _Type.POINTER:
+    edge_fts += encoding
+
+  elif dp.location == _Location.EDGE:
+    if dp.type_ == _Type.POINTER:
+      # Aggregate pointer contributions across sender and receiver nodes.
+      encoding_2 = encoders[1](jnp.expand_dims(data, -1))
+      edge_fts += jnp.mean(encoding, axis=1) + jnp.mean(encoding_2, axis=2)
+    else:
+      edge_fts += encoding
+
+  return edge_fts
+
+
+def accum_node_fts(encoders, dp: _DataPoint, data: _Array,
+                   node_fts: _Array) -> _Array:
+  """Encodes and accumulates node features."""
+  encoding = _encode_inputs(encoders, dp, data)
+
+  if ((dp.location == _Location.NODE and dp.type_ != _Type.POINTER) or
+      (dp.location == _Location.GRAPH and dp.type_ == _Type.POINTER)):
+    node_fts += encoding
+
+  return node_fts
+
+
+def accum_graph_fts(encoders, dp: _DataPoint, data: _Array,
+                    graph_fts: _Array) -> _Array:
+  """Encodes and accumulates graph features."""
+  encoding = _encode_inputs(encoders, dp, data)
+
+  if dp.location == _Location.GRAPH and dp.type_ != _Type.POINTER:
+    graph_fts += encoding
+
+  return graph_fts
+
+
+def _encode_inputs(encoders, dp: _DataPoint, data: _Array) -> _Array:
+  if dp.type_ == _Type.CATEGORICAL:
+    encoding = encoders[0](data)
+  else:
+    encoding = encoders[0](jnp.expand_dims(data, -1))
+  return encoding
