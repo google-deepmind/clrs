@@ -65,10 +65,16 @@ class CLRSDataset(tfds.core.GeneratorBasedBuilder):
 
   def _create_data(self, single_sample):
     algorithm_name = '_'.join(self._builder_config.name.split('_')[:-1])
+    num_samples = samplers.CLRS30[self._builder_config.split]['num_samples']
+    if self._builder_config.split != 'train':
+      # Generate more samples for those algorithms in which the number of
+      # signals is small.
+      num_samples *= specs.CLRS_30_ALGS_SETTINGS[algorithm_name][
+          'num_samples_multiplier']
     sampler, _ = samplers.build_sampler(
         algorithm_name,
         seed=samplers.CLRS30[self._builder_config.split]['seed'],
-        num_samples=samplers.CLRS30[self._builder_config.split]['num_samples'],
+        num_samples=num_samples,
         length=samplers.CLRS30[self._builder_config.split]['length'],
     )
     sampled_dataset = sampler.next(batch_size=1 if single_sample else None)
