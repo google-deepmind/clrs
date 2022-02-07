@@ -25,6 +25,7 @@ import chex
 
 from clrs._src import decoders
 from clrs._src import encoders
+from clrs._src import losses
 from clrs._src import model
 from clrs._src import probing
 from clrs._src import processors
@@ -48,13 +49,6 @@ _Stage = specs.Stage
 _Trajectory = samplers.Trajectory
 _Type = specs.Type
 _OutputClass = specs.OutputClass
-
-
-def _is_not_done_broadcast(lengths, i, tensor):
-  is_not_done = (lengths > i + 1) * 1.0
-  while len(is_not_done.shape) < len(tensor.shape):
-    is_not_done = jnp.expand_dims(is_not_done, -1)
-  return is_not_done
 
 
 @chex.dataclass
@@ -274,7 +268,7 @@ class Net(hk.Module):
             loc, t, hidden_dim=self.hidden_dim, nb_dims=self.nb_dims[name])
 
     if self.decode_diffs:
-      # Optionally build diff encoder/decoders.
+      # Optionally build diff decoders.
       self.node_dec_diff = hk.Linear(1)
       self.edge_dec_diff = (hk.Linear(1), hk.Linear(1), hk.Linear(1))
       self.graph_dec_diff = (hk.Linear(1), hk.Linear(1))
@@ -525,126 +519,45 @@ class BaselineModel(model.Model):
     """Model update step."""
 
     def loss(params, rng_key, feedback):
+      """Calculates model loss f(feedback; params)."""
       (output_preds, hint_preds, diff_logits,
        gt_diffs) = self.net_fn_apply(params, rng_key, feedback.features, False)
 
-      for inp in feedback.features.inputs:
-        if inp.location in [_Location.NODE, _Location.EDGE]:
-          nb_nodes = inp.data.shape[1]
-          break
-
-      total_loss = 0.0
+      nb_nodes = _nb_nodes(feedback)
       lengths = feedback.features.lengths
+      total_loss = 0.0
+
+      # Calculate output loss.
+      for truth in feedback.outputs:
+        total_loss += losses.output_loss(
+            truth=truth,
+            preds=output_preds,
+            nb_nodes=nb_nodes,
+        )
+
+      # Optionally accumulate diff losses.
       if self.decode_diffs:
-        for loc in [_Location.NODE, _Location.EDGE, _Location.GRAPH]:
-          for i in range(len(gt_diffs)):
-            is_not_done = _is_not_done_broadcast(
-                lengths, i, diff_logits[i][loc])
-            diff_loss = (
-                jnp.maximum(diff_logits[i][loc], 0) -
-                diff_logits[i][loc] * gt_diffs[i][loc] +
-                jnp.log1p(jnp.exp(-jnp.abs(diff_logits[i][loc]))) *
-                is_not_done)
+        total_loss += losses.diff_loss(
+            diff_logits=diff_logits,
+            gt_diffs=gt_diffs,
+            lengths=lengths,
+        )
 
-            total_loss += jnp.mean(diff_loss)
-
+      # Optionally accumulate hint losses.
       if self.decode_hints:
         for truth in feedback.features.hints:
-          for i in range(truth.data.shape[0] - 1):
-            assert truth.name in hint_preds[i]
-            pred = hint_preds[i][truth.name]
-            is_not_done = _is_not_done_broadcast(
-                lengths, i, truth.data[i + 1])
-            if truth.type_ == _Type.SCALAR:
-              if self.decode_diffs:
-                total_loss += jnp.mean(
-                    (pred - truth.data[i + 1])**2 *
-                    gt_diffs[i][truth.location] * is_not_done)
-              else:
-                total_loss += jnp.mean(
-                    (pred - truth.data[i + 1])**2 * is_not_done)
-            elif truth.type_ == _Type.MASK:
-              if self.decode_diffs:
-                loss = jnp.mean(
-                    jnp.maximum(pred, 0) - pred * truth.data[i + 1] +
-                    jnp.log1p(jnp.exp(-jnp.abs(pred))) *
-                    gt_diffs[i][truth.location] * is_not_done)
-              else:
-                loss = jnp.mean(
-                    jnp.maximum(pred, 0) - pred * truth.data[i + 1] +
-                    jnp.log1p(jnp.exp(-jnp.abs(pred))) * is_not_done)
-              mask = (truth.data != _OutputClass.MASKED).astype(
-                  jnp.float32)
-              total_loss += jnp.sum(loss*mask)/jnp.sum(mask)
-            elif truth.type_ == _Type.MASK_ONE:
-              if self.decode_diffs:
-                total_loss += jnp.mean(
-                    -jnp.sum(
-                        truth.data[i + 1] * jax.nn.log_softmax(
-                            pred) * is_not_done, axis=-1, keepdims=True) *
-                    gt_diffs[i][truth.location])
-              else:
-                total_loss += jnp.mean(-jnp.sum(
-                    truth.data[i + 1] * jax.nn.log_softmax(
-                        pred) * is_not_done, axis=-1))
-            elif truth.type_ == _Type.CATEGORICAL:
-              unmasked_data = truth.data[
-                  truth.data == _OutputClass.POSITIVE]
-              masked_truth = truth.data * (
-                  truth.data != _OutputClass.MASKED).astype(jnp.float32)
-              if self.decode_diffs:
-                total_loss += jnp.sum(
-                    -jnp.sum(
-                        masked_truth[i + 1] * jax.nn.log_softmax(
-                            pred), axis=-1, keepdims=True) *
-                    jnp.expand_dims(gt_diffs[i][truth.location], -1) *
-                    is_not_done) / jnp.sum(unmasked_data)
-              else:
-                total_loss += jnp.sum(-jnp.sum(
-                    masked_truth[i + 1] * jax.nn.log_softmax(pred), axis=-1) *
-                                      is_not_done) / jnp.sum(unmasked_data)
-            elif truth.type_ == _Type.POINTER:
-              if self.decode_diffs:
-                total_loss += jnp.mean(-jnp.sum(
-                    hk.one_hot(truth.data[i + 1], nb_nodes) *
-                    jax.nn.log_softmax(pred),
-                    axis=-1) * gt_diffs[i][truth.location] * is_not_done)
-              else:
-                total_loss += jnp.mean(-jnp.sum(
-                    hk.one_hot(truth.data[i + 1], nb_nodes) *
-                    jax.nn.log_softmax(pred),
-                    axis=-1) * is_not_done)
-            else:
-              raise ValueError('Incorrect type')
-        total_loss /= (truth.data.shape[0] - 1)  # pylint: disable=undefined-loop-variable
-
-      for truth in feedback.outputs:
-        assert truth.name in output_preds
-        pred = output_preds[truth.name]
-        if truth.type_ == _Type.SCALAR:
-          total_loss += jnp.mean((pred - truth.data)**2)
-        elif truth.type_ == _Type.MASK:
-          loss = (jnp.maximum(pred, 0) - pred * truth.data +
-                  jnp.log1p(jnp.exp(-jnp.abs(pred))))
-          mask = (truth.data != _OutputClass.MASKED).astype(jnp.float32)
-          total_loss += jnp.sum(loss*mask)/jnp.sum(mask)
-        elif truth.type_ in [_Type.MASK_ONE, _Type.CATEGORICAL]:
-          unmasked_data = truth.data[truth.data == _OutputClass.POSITIVE]
-          masked_truth = truth.data * (
-              truth.data != _OutputClass.MASKED).astype(jnp.float32)
-          total_loss += (
-              -jnp.sum(masked_truth * jax.nn.log_softmax(pred))
-              / jnp.sum(unmasked_data))
-        elif truth.type_ == _Type.POINTER:
-          total_loss += (
-              jnp.mean(-jnp.sum(
-                  hk.one_hot(truth.data, nb_nodes) * jax.nn.log_softmax(pred),
-                  axis=-1)))
-        else:
-          raise ValueError('Incorrect type')
+          total_loss += losses.hint_loss(
+              truth=truth,
+              preds=hint_preds,
+              gt_diffs=gt_diffs,
+              lengths=lengths,
+              nb_nodes=nb_nodes,
+              decode_diffs=self.decode_diffs,
+          )
 
       return total_loss
 
+    # Calculate and apply gradients.
     lss, grads = jax.value_and_grad(loss)(params, rng_key, feedback)
     updates, opt_state = self.opt.update(grads, opt_state)
     if self._freeze_processor:
@@ -654,91 +567,42 @@ class BaselineModel(model.Model):
       new_params = hk.data_structures.merge(params, new_params)
     else:
       new_params = optax.apply_updates(params, updates)
+
     return new_params, opt_state, lss
 
   def verbose_loss(self, feedback: _Feedback, extra_info) -> Dict[str, _Array]:
     """Gets verbose loss information."""
     hint_preds, diff_logits, gt_diffs = extra_info
 
-    for inp in feedback.features.inputs:
-      if inp.location in [_Location.NODE, _Location.EDGE]:
-        nb_nodes = inp.data.shape[1]
-        break
-
-    total_loss = 0.0
+    nb_nodes = _nb_nodes(feedback)
     lengths = feedback.features.lengths
+    losses_ = {}
 
-    losses = {}
+    # Optionally accumulate diff losses.
     if self.decode_diffs:
-      for loc in [_Location.NODE, _Location.EDGE, _Location.GRAPH]:
-        for i in range(len(gt_diffs)):
-          is_not_done = _is_not_done_broadcast(lengths, i, gt_diffs[i][loc])
-          diff_loss = (
-              jnp.maximum(diff_logits[i][loc], 0) -
-              diff_logits[i][loc] * gt_diffs[i][loc] +
-              jnp.log1p(jnp.exp(-jnp.abs(diff_logits[i][loc]))) * is_not_done)
-          losses[loc + '_diff_%d' % i] = jnp.mean(diff_loss)
+      losses_.update(
+          losses.diff_loss(
+              diff_logits=diff_logits,
+              gt_diffs=gt_diffs,
+              lengths=lengths,
+              verbose=True,
+          ))
 
+    # Optionally accumulate hint losses.
     if self.decode_hints:
       for truth in feedback.features.hints:
-        for i in range(truth.data.shape[0] - 1):
-          assert truth.name in hint_preds[i]
-          pred = hint_preds[i][truth.name]
-          is_not_done = _is_not_done_broadcast(lengths, i, truth.data[i + 1])
-          if truth.type_ == _Type.SCALAR:
-            if self.decode_diffs:
-              total_loss = jnp.mean((pred - truth.data[i + 1])**2 *
-                                    gt_diffs[i][truth.location] * is_not_done)
-            else:
-              total_loss = jnp.mean((pred - truth.data[i + 1])**2 * is_not_done)
-          elif truth.type_ == _Type.MASK:
-            if self.decode_diffs:
-              total_loss = jnp.mean(
-                  jnp.maximum(pred, 0) - pred * truth.data[i + 1] +
-                  jnp.log1p(jnp.exp(-jnp.abs(pred))) *
-                  gt_diffs[i][truth.location] * is_not_done)
-            else:
-              total_loss = jnp.mean(
-                  jnp.maximum(pred, 0) - pred * truth.data[i + 1] +
-                  jnp.log1p(jnp.exp(-jnp.abs(pred))) * is_not_done)
-          elif truth.type_ == _Type.MASK_ONE:
-            if self.decode_diffs:
-              total_loss = jnp.mean(
-                  -jnp.sum(
-                      truth.data[i + 1] * jax.nn.log_softmax(
-                          pred) * is_not_done, axis=-1, keepdims=True) *
-                  gt_diffs[i][truth.location])
-            else:
-              total_loss = jnp.mean(-jnp.sum(
-                  truth.data[i + 1] * jax.nn.log_softmax(
-                      pred) * is_not_done, axis=-1))
-          elif truth.type_ == _Type.CATEGORICAL:
-            if self.decode_diffs:
-              total_loss = jnp.mean(
-                  -jnp.sum(
-                      truth.data[i + 1] * jax.nn.log_softmax(
-                          pred), axis=-1, keepdims=True) *
-                  jnp.expand_dims(gt_diffs[i][truth.location], -1) *
-                  is_not_done)
-            else:
-              total_loss = jnp.mean(-jnp.sum(
-                  truth.data[i + 1] * jax.nn.log_softmax(pred), axis=-1) *
-                                    is_not_done)
-          elif truth.type_ == _Type.POINTER:
-            if self.decode_diffs:
-              total_loss = jnp.mean(-jnp.sum(
-                  hk.one_hot(truth.data[i + 1], nb_nodes) *
-                  jax.nn.log_softmax(pred),
-                  axis=-1) * gt_diffs[i][truth.location] * is_not_done)
-            else:
-              total_loss = jnp.mean(-jnp.sum(
-                  hk.one_hot(truth.data[i + 1], nb_nodes) *
-                  jax.nn.log_softmax(pred),
-                  axis=-1) * is_not_done)
-          else:
-            raise ValueError('Incorrect type')
-          losses[truth.name + '_%d' % i] = total_loss
-    return losses
+        losses_.update(
+            losses.hint_loss(
+                truth=truth,
+                preds=hint_preds,
+                gt_diffs=gt_diffs,
+                lengths=lengths,
+                nb_nodes=nb_nodes,
+                decode_diffs=self.decode_diffs,
+                verbose=True,
+            ))
+
+    return losses_
 
   def restore_model(self, file_name: str, only_load_processor: bool = False):
     """Restore model from `file_name`."""
@@ -761,6 +625,20 @@ class BaselineModel(model.Model):
       pickle.dump(to_save, f)
 
 
+def _nb_nodes(feedback: _Feedback):
+  for inp in feedback.features.inputs:
+    if inp.location in [_Location.NODE, _Location.EDGE]:
+      return inp.data.shape[1]
+  assert False
+
+
 def _filter_processor(params: hk.Params) -> hk.Params:
   return hk.data_structures.filter(
       lambda module_name, n, v: 'construct_processor' in module_name, params)
+
+
+def _is_not_done_broadcast(lengths, i, tensor):
+  is_not_done = (lengths > i + 1) * 1.0
+  while len(is_not_done.shape) < len(tensor.shape):
+    is_not_done = jnp.expand_dims(is_not_done, -1)
+  return is_not_done
