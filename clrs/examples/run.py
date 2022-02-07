@@ -56,9 +56,9 @@ flags.DEFINE_enum(
      'memnet_full', 'memnet_masked'],
     'Whether to predict masks within the model.')
 
-flags.DEFINE_string('checkpoint_path', '/tmp/clrs3',
+flags.DEFINE_string('checkpoint_path', '/tmp/CLRS30',
                     'Path in which checkpoints are saved.')
-flags.DEFINE_string('dataset_path', '/tmp/clrs3',
+flags.DEFINE_string('dataset_path', '/tmp/CLRS30',
                     'Path in which dataset is stored.')
 flags.DEFINE_boolean('freeze_processor', False,
                      'Whether to freeze the processor of the model.')

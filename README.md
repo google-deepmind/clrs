@@ -39,6 +39,10 @@ and to run our example baseline model:
 python -m clrs.examples.run
 ```
 
+If this is the first run of the example, the dataset will be downloaded and
+stored in `--dataset_path` (default '/tmp/CLRS30').
+Alternatively, you can also download and extract https://storage.googleapis.com/dm-clrs/CLRS30.tar.gz
+
 ## Algorithms as graphs
 
 CLRS implements the selected algorithms in an idiomatic way, which aligns as
@@ -72,10 +76,11 @@ where "problem size" refers to e.g. the length of an array or number of nodes in
 a graph, depending on the algorithm. These trajectories can be used like so:
 
 ```python
-train_ds, spec = clrs.clrs21_train("bfs")
+train_ds, spec = clrs.create_dataset(
+      folder='/tmp/CLRS30', algorithm='bfs',
+      split='train', batch_size=32)
 
-for step in range(num_train_steps):
-  feedback = train_sampler.next(batch_size)
+for feedback in train_ds.as_numpy_iterator():
   model.train(feedback.features)
 ```
 
@@ -149,6 +154,13 @@ We additionally provide JAX implementations of the following GNN baselines:
 
 - Graph Attention Networks (Velickovic et al., ICLR 2018)
 - Message-Passing Neural Networks (Gilmer et al., ICML 2017)
+
+## Creating your own dataset
+
+We provide a `tensorflow_dataset` generator class in `dataset.py`. This file can
+be modified to generate different versions of the available algorithms, and it
+can be built by using `tfds build` after following the installation instructions
+at https://www.tensorflow.org/datasets.
 
 ## Citation
 
