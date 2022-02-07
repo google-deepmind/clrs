@@ -307,11 +307,12 @@ class Net(hk.Module):
     elif self.kind == 'memnet_full' or self.kind == 'memnet_masked':
       self.memnet = processors.MemNet(
           vocab_size=self.hidden_dim,
-          embedding_size=self.hidden_dim,
+          embedding_size=16,
           sentence_size=self.hidden_dim,
           linear_output_size=self.hidden_dim,
+          memory_size=128,
           num_hops=1,
-          apply_embeddings=False)
+          apply_embeddings=True)
 
   def _one_step_pred(
       self,

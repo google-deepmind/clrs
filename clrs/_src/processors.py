@@ -392,6 +392,10 @@ class MemNet(hk.Module):
       output_embeddings = jnp.take(
           output_biases, stories.reshape([-1]).astype(jnp.int32),
           axis=0).reshape(list(stories.shape) + [self._embedding_size])
+      output_embeddings = jnp.pad(
+          output_embeddings,
+          ((0, 0), (0, self._memory_size - jnp.shape(output_embeddings)[1]),
+           (0, 0), (0, 0)))
       output = jnp.sum(output_embeddings * self._encodings, 2)
     else:
       output = stories
