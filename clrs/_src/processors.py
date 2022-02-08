@@ -42,6 +42,9 @@ class GAT(hk.Module):
     super().__init__(name=name)
     self.out_size = out_size
     self.nb_heads = nb_heads
+    if out_size % nb_heads != 0:
+      raise ValueError('The number of attention heads must divide the width!')
+    self.head_size = out_size // nb_heads
     self.activation = activation
     self.residual = residual
 
@@ -72,24 +75,35 @@ class GAT(hk.Module):
     skip = hk.Linear(self.out_size)
 
     bias_mat = (adj - 1.0) * 1e9
+    bias_mat = jnp.tile(bias_mat, (1, 1, 1, self.nb_heads))  # [B, N, N, H]
+    bias_mat = jnp.transpose(bias_mat, (0, 3, 1, 2))         # [B, H, N, N]
 
-    a_1 = hk.Linear(1)
-    a_2 = hk.Linear(1)
-    a_e = hk.Linear(1)
-    a_g = hk.Linear(1)
+    a_1 = hk.Linear(self.nb_heads)
+    a_2 = hk.Linear(self.nb_heads)
+    a_e = hk.Linear(self.nb_heads)
+    a_g = hk.Linear(self.nb_heads)
 
-    values = m(features)
+    values = m(features)                                      # [B, N, H*F]
+    values = jnp.reshape(
+        values,
+        values.shape[:-1] + (self.nb_heads, self.head_size))  # [B, N, H, F]
+    values = jnp.transpose(values, (0, 2, 1, 3))              # [B, H, N, F]
 
-    att_1 = a_1(features)
-    att_2 = a_2(features)
+    att_1 = jnp.expand_dims(a_1(features), axis=-1)
+    att_2 = jnp.expand_dims(a_2(features), axis=-1)
     att_e = a_e(e_features)
-    att_g = a_g(g_features)
+    att_g = jnp.expand_dims(a_g(g_features), axis=-1)
 
     logits = (
-        att_1 + jnp.transpose(att_2, (0, 2, 1)) + jnp.squeeze(att_e, axis=-1) +
-        jnp.expand_dims(att_g, axis=-1))
+        jnp.transpose(att_1, (0, 2, 1, 3)) +  # + [B, H, N, 1]
+        jnp.transpose(att_2, (0, 2, 3, 1)) +  # + [B, H, 1, N]
+        jnp.transpose(att_e, (0, 3, 1, 2)) +  # + [B, H, N, N]
+        jnp.expand_dims(att_g, axis=-1)       # + [B, H, 1, 1]
+    )                                         # = [B, H, N, N]
     coefs = jax.nn.softmax(jax.nn.leaky_relu(logits) + bias_mat, axis=-1)
-    ret = jnp.matmul(coefs, values)
+    ret = jnp.matmul(coefs, values)  # [B, H, N, F]
+    ret = jnp.transpose(ret, (0, 2, 1, 3))  # [B, N, H, F]
+    ret = jnp.reshape(ret, ret.shape[:-2] + (self.out_size,))  # [B, N, H*F]
 
     if self.residual:
       ret += skip(features)
@@ -119,6 +133,12 @@ class GATv2(hk.Module):
       self.mid_size = mid_size
     self.out_size = out_size
     self.nb_heads = nb_heads
+    if out_size % nb_heads != 0:
+      raise ValueError('The number of attention heads must divide the width!')
+    self.head_size = out_size // nb_heads
+    if self.mid_size % nb_heads != 0:
+      raise ValueError('The number of attention heads must divide the message!')
+    self.mid_head_size = self.mid_size // nb_heads
     self.activation = activation
     self.residual = residual
 
@@ -149,15 +169,23 @@ class GATv2(hk.Module):
     skip = hk.Linear(self.out_size)
 
     bias_mat = (adj - 1.0) * 1e9
+    bias_mat = jnp.tile(bias_mat, (1, 1, 1, self.nb_heads))  # [B, N, N, H]
+    bias_mat = jnp.transpose(bias_mat, (0, 3, 1, 2))         # [B, H, N, N]
 
     w_1 = hk.Linear(self.mid_size)
     w_2 = hk.Linear(self.mid_size)
     w_e = hk.Linear(self.mid_size)
     w_g = hk.Linear(self.mid_size)
 
-    a = hk.Linear(1)
+    a_heads = []
+    for _ in range(self.nb_heads):
+      a_heads.append(hk.Linear(1))
 
-    values = m(features)
+    values = m(features)                                      # [B, N, H*F]
+    values = jnp.reshape(
+        values,
+        values.shape[:-1] + (self.nb_heads, self.head_size))  # [B, N, H, F]
+    values = jnp.transpose(values, (0, 2, 1, 3))              # [B, H, N, F]
 
     pre_att_1 = w_1(features)
     pre_att_2 = w_2(features)
@@ -165,14 +193,35 @@ class GATv2(hk.Module):
     pre_att_g = w_g(g_features)
 
     pre_att = (
-        jnp.expand_dims(pre_att_1, axis=1) + jnp.expand_dims(
-            pre_att_2, axis=2) + pre_att_e + jnp.expand_dims(
-                pre_att_g, axis=(1, 2)))
+        jnp.expand_dims(pre_att_1, axis=1) +     # + [B, 1, N, H*F]
+        jnp.expand_dims(pre_att_2, axis=2) +     # + [B, N, 1, H*F]
+        pre_att_e +                              # + [B, N, N, H*F]
+        jnp.expand_dims(pre_att_g, axis=(1, 2))  # + [B, 1, 1, H*F]
+    )                                            # = [B, N, N, H*F]
 
-    logits = jnp.squeeze(a(jax.nn.leaky_relu(pre_att)), axis=-1)
+    pre_att = jnp.reshape(
+        pre_att,
+        pre_att.shape[:-1] + (self.nb_heads, self.mid_head_size)
+    )  # [B, N, N, H, F]
+
+    pre_att = jnp.transpose(pre_att, (0, 3, 1, 2, 4))  # [B, H, N, N, F]
+
+    # This part is not very efficient, but we agree to keep it this way to
+    # enhance readability, assuming `nb_heads` will not be large.
+    logit_heads = []
+    for head in range(self.nb_heads):
+      logit_heads.append(
+          jnp.squeeze(
+              a_heads[head](jax.nn.leaky_relu(pre_att[:, head])),
+              axis=-1)
+      )  # [B, N, N]
+
+    logits = jnp.stack(logit_heads, axis=1)  # [B, H, N, N]
 
     coefs = jax.nn.softmax(logits + bias_mat, axis=-1)
-    ret = jnp.matmul(coefs, values)
+    ret = jnp.matmul(coefs, values)  # [B, H, N, F]
+    ret = jnp.transpose(ret, (0, 2, 1, 3))  # [B, N, H, F]
+    ret = jnp.reshape(ret, ret.shape[:-2] + (self.out_size,))  # [B, N, H*F]
 
     if self.residual:
       ret += skip(features)
