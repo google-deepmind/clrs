@@ -40,6 +40,7 @@ flags.DEFINE_integer('hidden_size', 128,
                      'Number of hidden size units of the model.')
 flags.DEFINE_float('learning_rate', 0.003, 'Learning rate to use.')
 flags.DEFINE_float('dropout_prob', 0.0, 'Dropout rate to use.')
+flags.DEFINE_integer('nb_heads', 1, 'Number of heads for GAT processors')
 
 flags.DEFINE_boolean('encode_hints', True,
                      'Whether to provide hints as model inputs.')
@@ -121,6 +122,7 @@ def main(unused_argv):
       checkpoint_path=FLAGS.checkpoint_path,
       freeze_processor=FLAGS.freeze_processor,
       dropout_prob=FLAGS.dropout_prob,
+      nb_heads=FLAGS.nb_heads,
       dummy_trajectory=next(train_sampler),
   )
 

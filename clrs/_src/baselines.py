@@ -76,6 +76,7 @@ class Net(hk.Module):
       inf_bias_edge: bool,
       use_lstm: bool,
       dropout_prob: float,
+      nb_heads: int,
       nb_dims=None,
       name: str = 'net',
   ):
@@ -93,6 +94,7 @@ class Net(hk.Module):
     self.kind = kind
     self.nb_dims = nb_dims
     self.use_lstm = use_lstm
+    self.nb_heads = nb_heads
 
   def _msg_passing_step(self,
                         mp_state: _MessagePassingScanState,
@@ -289,13 +291,13 @@ class Net(hk.Module):
     elif self.kind in ['gat', 'gat_full']:
       self.mpnn = processors.GAT(
           out_size=self.hidden_dim,
-          nb_heads=1,
+          nb_heads=self.nb_heads,
           activation=jax.nn.relu,
           residual=True)
     elif self.kind in ['gatv2', 'gatv2_full']:
-      self.mpnn = processors.GAT(
+      self.mpnn = processors.GATv2(
           out_size=self.hidden_dim,
-          nb_heads=1,
+          nb_heads=self.nb_heads,
           activation=jax.nn.relu,
           residual=True)
     elif self.kind == 'memnet_full' or self.kind == 'memnet_masked':
@@ -440,6 +442,7 @@ class BaselineModel(model.Model):
   def __init__(
       self,
       spec,
+      nb_heads=1,
       hidden_dim=32,
       kind='mpnn',
       encode_hints=False,
@@ -485,7 +488,7 @@ class BaselineModel(model.Model):
     def _use_net(*args, **kwargs):
       return Net(spec, hidden_dim, encode_hints, decode_hints, decode_diffs,
                  kind, inf_bias, inf_bias_edge, use_lstm, dropout_prob,
-                 self.nb_dims)(*args, **kwargs)
+                 nb_heads, self.nb_dims)(*args, **kwargs)
 
     self.net_fn = hk.transform(_use_net)
     self.net_fn_apply = jax.jit(self.net_fn.apply, static_argnums=3)
