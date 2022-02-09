@@ -75,8 +75,9 @@ class GAT(hk.Module):
     skip = hk.Linear(self.out_size)
 
     bias_mat = (adj - 1.0) * 1e9
-    bias_mat = jnp.tile(bias_mat, (1, 1, 1, self.nb_heads))  # [B, N, N, H]
-    bias_mat = jnp.transpose(bias_mat, (0, 3, 1, 2))         # [B, H, N, N]
+    bias_mat = jnp.tile(bias_mat[..., None],
+                        (1, 1, 1, self.nb_heads))     # [B, N, N, H]
+    bias_mat = jnp.transpose(bias_mat, (0, 3, 1, 2))  # [B, H, N, N]
 
     a_1 = hk.Linear(self.nb_heads)
     a_2 = hk.Linear(self.nb_heads)
@@ -169,8 +170,9 @@ class GATv2(hk.Module):
     skip = hk.Linear(self.out_size)
 
     bias_mat = (adj - 1.0) * 1e9
-    bias_mat = jnp.tile(bias_mat, (1, 1, 1, self.nb_heads))  # [B, N, N, H]
-    bias_mat = jnp.transpose(bias_mat, (0, 3, 1, 2))         # [B, H, N, N]
+    bias_mat = jnp.tile(bias_mat[..., None],
+                        (1, 1, 1, self.nb_heads))     # [B, N, N, H]
+    bias_mat = jnp.transpose(bias_mat, (0, 3, 1, 2))  # [B, H, N, N]
 
     w_1 = hk.Linear(self.mid_size)
     w_2 = hk.Linear(self.mid_size)
