@@ -26,9 +26,11 @@ import numpy as np
 
 class SamplersTest(parameterized.TestCase):
 
-  @parameterized.parameters(*specs.CLRS_21_ALGS)
+  @parameterized.parameters(*specs.CLRS_30_ALGS)
   def test_sampler_determinism(self, name):
-    sampler, _ = samplers.clrs21_val(name)
+    num_samples = 3
+    num_nodes = 10
+    sampler, _ = samplers.build_sampler(name, num_samples, num_nodes)
 
     np.random.seed(47)  # Set seed
     feedback = sampler.next()
