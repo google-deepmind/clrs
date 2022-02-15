@@ -25,6 +25,7 @@ _Array = chex.Array
 _DataPoint = probing.DataPoint
 _Location = specs.Location
 _Spec = specs.Spec
+_Stage = specs.Stage
 _Type = specs.Type
 
 _BIG_NUMBER = 1e5
@@ -73,6 +74,16 @@ def construct_decoders(loc: str, t: str, hidden_dim: int, nb_dims: int):
   return decoders
 
 
+def construct_diff_decoders():
+  """Constructs diff decoders."""
+  decoders = {}
+  decoders[_Location.NODE] = hk.Linear(1)
+  decoders[_Location.EDGE] = (hk.Linear(1), hk.Linear(1), hk.Linear(1))
+  decoders[_Location.GRAPH] = (hk.Linear(1), hk.Linear(1))
+
+  return decoders
+
+
 def postprocess(spec: _Spec, preds: _Array) -> Dict[str, _DataPoint]:
   """Postprocesses decoder output."""
   result = {}
@@ -97,8 +108,46 @@ def postprocess(spec: _Spec, preds: _Array) -> Dict[str, _DataPoint]:
   return result
 
 
-def decode_node_fts(decoders, t: str, h_t: _Array, adj_mat: _Array,
-                    inf_bias: bool) -> _Array:
+def decode_fts(
+    decoders,
+    spec: _Spec,
+    h_t: _Array,
+    adj_mat: _Array,
+    edge_fts: _Array,
+    graph_fts: _Array,
+    inf_bias: bool,
+    inf_bias_edge: bool,
+):
+  """Decodes node, edge and graph features."""
+  output_preds = {}
+  hint_preds = {}
+
+  for name in decoders:
+    decoder = decoders[name]
+    stage, loc, t = spec[name]
+
+    if loc == _Location.NODE:
+      preds = _decode_node_fts(decoder, t, h_t, adj_mat, inf_bias)
+    elif loc == _Location.EDGE:
+      preds = _decode_edge_fts(decoder, t, h_t, edge_fts, adj_mat,
+                               inf_bias_edge)
+    elif loc == _Location.GRAPH:
+      preds = _decode_graph_fts(decoder, t, h_t, graph_fts)
+    else:
+      raise ValueError("Invalid output type")
+
+    if stage == _Stage.OUTPUT:
+      output_preds[name] = preds
+    elif stage == _Stage.HINT:
+      hint_preds[name] = preds
+    else:
+      raise ValueError(f"Found unexpected decoder {name}")
+
+  return hint_preds, output_preds
+
+
+def _decode_node_fts(decoders, t: str, h_t: _Array, adj_mat: _Array,
+                     inf_bias: bool) -> _Array:
   """Decodes node features."""
 
   if t in [_Type.SCALAR, _Type.MASK, _Type.MASK_ONE]:
@@ -118,18 +167,15 @@ def decode_node_fts(decoders, t: str, h_t: _Array, adj_mat: _Array,
   return preds
 
 
-def decode_edge_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
-                    adj_mat: _Array, inf_bias_edge: bool) -> _Array:
+def _decode_edge_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
+                     adj_mat: _Array, inf_bias_edge: bool) -> _Array:
   """Decodes edge features."""
 
   pred_1 = decoders[0](h_t)
   pred_2 = decoders[1](h_t)
   pred_e = decoders[2](edge_fts)
-  pred = (
-      jnp.expand_dims(pred_1, -2) + jnp.expand_dims(pred_2, -3) + pred_e)
-  if t in [
-      _Type.SCALAR, _Type.MASK, _Type.MASK_ONE
-  ]:
+  pred = (jnp.expand_dims(pred_1, -2) + jnp.expand_dims(pred_2, -3) + pred_e)
+  if t in [_Type.SCALAR, _Type.MASK, _Type.MASK_ONE]:
     preds = jnp.squeeze(pred, -1)
   elif t == _Type.CATEGORICAL:
     preds = pred
@@ -145,8 +191,8 @@ def decode_edge_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
   return preds
 
 
-def decode_graph_fts(decoders, t: str, h_t: _Array,
-                     graph_fts: _Array) -> _Array:
+def _decode_graph_fts(decoders, t: str, h_t: _Array,
+                      graph_fts: _Array) -> _Array:
   """Decodes graph features."""
 
   gr_emb = jnp.max(h_t, axis=-2)
@@ -162,5 +208,65 @@ def decode_graph_fts(decoders, t: str, h_t: _Array,
     ptr_p = jnp.matmul(
         jnp.expand_dims(pred, 1), jnp.transpose(pred_2, (0, 2, 1)))
     preds = jnp.squeeze(ptr_p, 1)
+
+  return preds
+
+
+def maybe_decode_diffs(
+    diff_decoders,
+    h_t: _Array,
+    edge_fts: _Array,
+    graph_fts: _Array,
+    batch_size: int,
+    nb_nodes: int,
+    decode_diffs: bool,
+) -> Dict[str, _Array]:
+  """Optionally decodes node, edge and graph diffs."""
+
+  if decode_diffs:
+    preds = {}
+    node = _Location.NODE
+    edge = _Location.EDGE
+    graph = _Location.GRAPH
+    preds[node] = _decode_node_diffs(diff_decoders[node], h_t)
+    preds[edge] = _decode_edge_diffs(diff_decoders[edge], h_t, edge_fts)
+    preds[graph] = _decode_graph_diffs(diff_decoders[graph], h_t, graph_fts)
+
+  else:
+    preds = {
+        _Location.NODE: jnp.ones((batch_size, nb_nodes)),
+        _Location.EDGE: jnp.ones((batch_size, nb_nodes, nb_nodes)),
+        _Location.GRAPH: jnp.ones((batch_size))
+    }
+
+  return preds
+
+
+def _decode_node_diffs(decoders, h_t: _Array) -> _Array:
+  """Decodes node diffs."""
+  return jnp.squeeze(decoders(h_t), -1)
+
+
+def _decode_edge_diffs(decoders, h_t: _Array, edge_fts: _Array) -> _Array:
+  """Decodes edge diffs."""
+
+  e_pred_1 = decoders[0](h_t)
+  e_pred_2 = decoders[1](h_t)
+  e_pred_e = decoders[2](edge_fts)
+  preds = jnp.squeeze(
+      jnp.expand_dims(e_pred_1, -1) + jnp.expand_dims(e_pred_2, -1) + e_pred_e,
+      -1,
+  )
+
+  return preds
+
+
+def _decode_graph_diffs(decoders, h_t: _Array, graph_fts: _Array) -> _Array:
+  """Decodes graph diffs."""
+
+  gr_emb = jnp.max(h_t, axis=-2)
+  g_pred_n = decoders[0](gr_emb)
+  g_pred_g = decoders[1](graph_fts)
+  preds = jnp.squeeze(g_pred_n + g_pred_g, -1)
 
   return preds

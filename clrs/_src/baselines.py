@@ -169,9 +169,11 @@ class Net(hk.Module):
             cur_diffs = jnp.expand_dims(cur_diffs, -1)
           hint_preds[hint.name] = (
               cur_diffs * hint_preds[hint.name] + (1.0 - cur_diffs) * prev_hint)
+
     new_mp_state = _MessagePassingScanState(
         hint_preds=hint_preds, diff_logits=diff_logits, gt_diffs=gt_diffs,
         output_preds=output_preds, hiddens=hiddens, lstm_state=lstm_state)
+
     # Complying to jax.scan, the first returned value is the state we carry over
     # the second value is the output that will be stacked over steps.
     return new_mp_state, new_mp_state
@@ -271,9 +273,7 @@ class Net(hk.Module):
 
     if self.decode_diffs:
       # Optionally build diff decoders.
-      self.node_dec_diff = hk.Linear(1)
-      self.edge_dec_diff = (hk.Linear(1), hk.Linear(1), hk.Linear(1))
-      self.graph_dec_diff = (hk.Linear(1), hk.Linear(1))
+      self.diff_decoders = decoders.construct_diff_decoders()
 
   def _construct_processor(self):
     """Constructs processor."""
@@ -386,52 +386,29 @@ class Net(hk.Module):
     h_t = jnp.concatenate([z, nxt_hidden], axis=-1)
 
     # DECODE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    hint_preds = {}
-    output_preds = {}
-    diff_preds = {}
-
-    if self.decode_diffs:
-      diff_preds[_Location.NODE] = jnp.squeeze(self.node_dec_diff(h_t), -1)
-      e_pred_1 = self.edge_dec_diff[0](h_t)
-      e_pred_2 = self.edge_dec_diff[1](h_t)
-      e_pred_e = self.edge_dec_diff[2](edge_fts)
-      diff_preds[_Location.EDGE] = jnp.squeeze(
-          jnp.expand_dims(e_pred_1, -1) + jnp.expand_dims(e_pred_2, -1) +
-          e_pred_e, -1)
-      gr_emb = jnp.max(h_t, axis=-2)
-      g_pred_n = self.graph_dec_diff[0](gr_emb)
-      g_pred_g = self.graph_dec_diff[1](graph_fts)
-      diff_preds[_Location.GRAPH] = jnp.squeeze(g_pred_n + g_pred_g, -1)
-    else:
-      diff_preds = {
-          _Location.NODE: jnp.ones((self.batch_size, nb_nodes)),
-          _Location.EDGE: jnp.ones((self.batch_size, nb_nodes, nb_nodes)),
-          _Location.GRAPH: jnp.ones((self.batch_size))
-      }
 
     # Decode features and (optionally) hints.
-    for name in self.decoders:
-      decoder = self.decoders[name]
-      stage, loc, t = self.spec[name]
+    hint_preds, output_preds = decoders.decode_fts(
+        decoders=self.decoders,
+        spec=self.spec,
+        h_t=h_t,
+        adj_mat=adj_mat,
+        edge_fts=edge_fts,
+        graph_fts=graph_fts,
+        inf_bias=self.inf_bias,
+        inf_bias_edge=self.inf_bias_edge,
+    )
 
-      if loc == _Location.NODE:
-        preds = decoders.decode_node_fts(decoder, t, h_t, adj_mat,
-                                         self.inf_bias)
-      elif loc == _Location.EDGE:
-        preds = decoders.decode_edge_fts(decoder, t, h_t, edge_fts, adj_mat,
-                                         self.inf_bias_edge)
-      elif loc == _Location.GRAPH:
-        preds = decoders.decode_graph_fts(decoder, t, h_t, graph_fts)
-      else:
-        raise ValueError('Invalid output type')
-
-      if stage == _Stage.OUTPUT:
-        output_preds[name] = preds
-      elif stage == _Stage.HINT:
-        assert self.decode_hints
-        hint_preds[name] = preds
-      else:
-        raise ValueError(f'Found unexpected decoder {name}')
+    # Optionally decode diffs.
+    diff_preds = decoders.maybe_decode_diffs(
+        diff_decoders=self.diff_decoders,
+        h_t=h_t,
+        edge_fts=edge_fts,
+        graph_fts=graph_fts,
+        batch_size=self.batch_size,
+        nb_nodes=nb_nodes,
+        decode_diffs=self.decode_diffs,
+    )
 
     return nxt_hidden, output_preds, hint_preds, diff_preds, nxt_lstm_state
 
