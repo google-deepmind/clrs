@@ -113,6 +113,7 @@ class Net(hk.Module):
     else:
       cur_hint = []
       for hint in hints:
+        hint.data = jnp.asarray(hint.data)
         _, loc, typ = self.spec[hint.name]
         cur_hint.append(
             probing.DataPoint(
