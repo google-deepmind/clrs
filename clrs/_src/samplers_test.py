@@ -21,6 +21,7 @@ from absl.testing import parameterized
 from clrs._src import probing
 from clrs._src import samplers
 from clrs._src import specs
+import jax
 import numpy as np
 
 
@@ -42,6 +43,23 @@ class SamplersTest(parameterized.TestCase):
 
     # Validate that datasets are the same.
     np.testing.assert_array_equal(expected, actual)
+
+  @parameterized.parameters(*specs.CLRS_30_ALGS)
+  def test_sampler_batch_determinism(self, name):
+    num_samples = 10
+    batch_size = 5
+    num_nodes = 10
+    seed = 0
+    sampler_1, _ = samplers.build_sampler(
+        name, num_samples, num_nodes, seed=seed)
+    sampler_2, _ = samplers.build_sampler(
+        name, num_samples, num_nodes, seed=seed)
+
+    feedback_1 = sampler_1.next(batch_size)
+    feedback_2 = sampler_2.next(batch_size)
+
+    # Validate that datasets are the same.
+    jax.tree_map(np.testing.assert_array_equal, feedback_1, feedback_2)
 
   def test_end_to_end(self):
     num_samples = 7
