@@ -168,19 +168,14 @@ def _hint_loss(
           truth.data[i + 1] * jax.nn.log_softmax(pred) * is_not_done, axis=-1))
 
   elif truth.type_ == _Type.CATEGORICAL:
-    unmasked_data = truth.data[truth.data == _OutputClass.POSITIVE]
-    masked_truth = truth.data * (truth.data != _OutputClass.MASKED).astype(
-        jnp.float32)
+    masked_truth = truth.data[i + 1] * (
+        truth.data[i + 1] != _OutputClass.MASKED).astype(jnp.float32)
+    loss = -jnp.sum(masked_truth * jax.nn.log_softmax(pred) * is_not_done,
+                    axis=-1)
     if decode_diffs:
-      total_loss = jnp.sum(-jnp.sum(
-          masked_truth[i + 1] * jax.nn.log_softmax(pred),
-          axis=-1,
-          keepdims=True) * jnp.expand_dims(gt_diffs[i][truth.location], -1) *
-                           is_not_done) / jnp.sum(unmasked_data)
-    else:
-      total_loss = jnp.sum(
-          -jnp.sum(masked_truth[i + 1] * jax.nn.log_softmax(pred), axis=-1) *
-          is_not_done) / jnp.sum(unmasked_data)
+      loss *= gt_diffs[i][truth.location]
+    total_unmasked = jnp.sum(truth.data[i + 1] == _OutputClass.POSITIVE)
+    total_loss = jnp.sum(loss) / jnp.maximum(total_unmasked, EPS)
 
   elif truth.type_ == _Type.POINTER:
     if decode_diffs:
