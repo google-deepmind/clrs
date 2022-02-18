@@ -35,14 +35,14 @@ class MemnetTest(absltest.TestCase):
     num_hops = 2
 
     def forward_fn(queries, stories):
-      model = processors.MemNet(
+      model = processors.MemNetFull(
           vocab_size=vocab_size,
           embedding_size=embedding_size,
           sentence_size=sentence_size,
           memory_size=memory_size,
           linear_output_size=linear_output_size,
           num_hops=num_hops)
-      return model(queries, stories)
+      return model._apply(queries, stories)
 
     forward = hk.transform(forward_fn)
 
