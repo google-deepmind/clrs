@@ -35,6 +35,8 @@ Trajectories = List[Trajectory]
 
 Algorithm = Callable[..., Any]
 Features = collections.namedtuple('Features', ['inputs', 'hints', 'lengths'])
+FeaturesChunked = collections.namedtuple(
+    'Features', ['inputs', 'hints', 'is_first', 'is_last'])
 Feedback = collections.namedtuple('Feedback', ['features', 'outputs'])
 
 # CLRS-30 baseline spec.
