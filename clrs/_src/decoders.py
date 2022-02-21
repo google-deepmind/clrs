@@ -84,7 +84,7 @@ def construct_diff_decoders():
   return decoders
 
 
-def postprocess(spec: _Spec, preds: _Array) -> Dict[str, _DataPoint]:
+def postprocess(spec: _Spec, preds: Dict[str, _Array]) -> Dict[str, _DataPoint]:
   """Postprocesses decoder output."""
   result = {}
   for name in preds.keys():
@@ -254,7 +254,7 @@ def _decode_edge_diffs(decoders, h_t: _Array, edge_fts: _Array) -> _Array:
   e_pred_2 = decoders[1](h_t)
   e_pred_e = decoders[2](edge_fts)
   preds = jnp.squeeze(
-      jnp.expand_dims(e_pred_1, -1) + jnp.expand_dims(e_pred_2, -1) + e_pred_e,
+      jnp.expand_dims(e_pred_1, -1) + jnp.expand_dims(e_pred_2, -2) + e_pred_e,
       -1,
   )
 
