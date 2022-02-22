@@ -14,9 +14,9 @@
 # ==============================================================================
 """Utilities for calculating losses."""
 
+from typing import Dict, List
 import chex
 from clrs._src import probing
-from clrs._src import samplers
 from clrs._src import specs
 
 import haiku as hk
@@ -27,17 +27,59 @@ _Array = chex.Array
 _DataPoint = probing.DataPoint
 _Location = specs.Location
 _OutputClass = specs.OutputClass
-_Trajectories = samplers.Trajectories
-_Trajectory = samplers.Trajectory
+_PredTrajectory = Dict[str, _Array]
+_PredTrajectories = List[_PredTrajectory]
 _Type = specs.Type
 
 EPS = 1e-12
 
 
-def output_loss(truth: _DataPoint, preds: _Trajectory, nb_nodes: int) -> float:
-  """Calculates the output loss."""
+def _expand_to(x: _Array, y: _Array) -> _Array:
+  while len(y.shape) > len(x.shape):
+    x = jnp.expand_dims(x, -1)
+  return x
 
-  pred = preds[truth.name]
+
+def _expand_and_broadcast_to(x: _Array, y: _Array) -> _Array:
+  return jnp.broadcast_to(_expand_to(x, y), y.shape)
+
+
+def output_loss_chunked(truth: _DataPoint, pred: _Array,
+                        is_last: _Array, nb_nodes: int) -> float:
+  """Output loss for time-chunked training."""
+
+  mask = None
+
+  if truth.type_ == _Type.SCALAR:
+    loss = (pred - truth.data)**2
+
+  elif truth.type_ == _Type.MASK:
+    loss = (
+        jnp.maximum(pred, 0) - pred * truth.data +
+        jnp.log1p(jnp.exp(-jnp.abs(pred))))
+    mask = (truth.data != _OutputClass.MASKED)
+
+  elif truth.type_ in [_Type.MASK_ONE, _Type.CATEGORICAL]:
+    mask = jnp.any(truth.data == _OutputClass.POSITIVE, axis=-1)
+    masked_truth = truth.data * (truth.data != _OutputClass.MASKED).astype(
+        jnp.float32)
+    loss = -jnp.sum(masked_truth * jax.nn.log_softmax(pred), axis=-1)
+
+  elif truth.type_ == _Type.POINTER:
+    loss = -jnp.sum(
+        hk.one_hot(truth.data, nb_nodes) * jax.nn.log_softmax(pred), axis=-1)
+
+  if mask is not None:
+    mask = mask * _expand_and_broadcast_to(is_last, loss)
+  else:
+    mask = _expand_and_broadcast_to(is_last, loss)
+  total_mask = jnp.maximum(jnp.sum(mask), EPS)
+  return jnp.sum(jnp.where(mask, loss, 0.0)) / total_mask
+
+
+def output_loss(truth: _DataPoint, pred: _Array, nb_nodes: int) -> float:
+  """Output loss for full-sample training."""
+
   if truth.type_ == _Type.SCALAR:
     total_loss = jnp.mean((pred - truth.data)**2)
 
@@ -64,8 +106,23 @@ def output_loss(truth: _DataPoint, preds: _Trajectory, nb_nodes: int) -> float:
   return total_loss
 
 
+def diff_loss_chunked(diff_logits, gt_diffs, is_first):
+  """Diff loss for time-chunked training."""
+  total_loss = 0.
+  for loc in [_Location.NODE, _Location.EDGE, _Location.GRAPH]:
+    valid = (1 - _expand_and_broadcast_to(is_first, diff_logits[loc])).astype(
+        jnp.float32)
+    total_valid = jnp.maximum(jnp.sum(valid), EPS)
+    loss = (
+        jnp.maximum(diff_logits[loc], 0) -
+        diff_logits[loc] * gt_diffs[loc] +
+        jnp.log1p(jnp.exp(-jnp.abs(diff_logits[loc]))))
+    total_loss += jnp.sum(jnp.where(valid, loss, 0.0)) / total_valid
+  return total_loss
+
+
 def diff_loss(diff_logits, gt_diffs, lengths, verbose=False):
-  """Calculates diff losses."""
+  """Diff loss for full-sample training."""
   total_loss = 0.
   verbose_loss = dict()
   length = len(gt_diffs)
@@ -82,7 +139,7 @@ def diff_loss(diff_logits, gt_diffs, lengths, verbose=False):
 
 
 def _diff_loss(loc, i, diff_logits, gt_diffs, lengths) -> float:
-  """Diff loss helper."""
+  """Full-sample diff loss helper."""
   is_not_done = _is_not_done_broadcast(lengths, i, diff_logits[i][loc])
   loss = (
       jnp.maximum(diff_logits[i][loc], 0) -
@@ -92,16 +149,67 @@ def _diff_loss(loc, i, diff_logits, gt_diffs, lengths) -> float:
   return jnp.mean(loss)
 
 
+def hint_loss_chunked(
+    truth: _DataPoint,
+    pred: _Array,
+    gt_diffs: _PredTrajectory,
+    is_first: _Array,
+    nb_nodes: int,
+    decode_diffs: bool,
+):
+  """Hint loss for time-chunked training."""
+  truth_data = truth.data
+  if decode_diffs:
+    gt_diff = gt_diffs[truth.location]
+  valid = (1 - _expand_to(is_first, truth_data)).astype(jnp.float32)
+  if truth.type_ == _Type.SCALAR:
+    loss = (pred - truth_data)**2
+    if decode_diffs:
+      loss *= gt_diff
+  elif truth.type_ == _Type.MASK:
+    if decode_diffs:
+      loss = (jnp.maximum(pred, 0) - pred * truth_data +
+              jnp.log1p(jnp.exp(-jnp.abs(pred))) * gt_diff)
+    else:
+      loss = (jnp.maximum(pred, 0) - pred * truth_data +
+              jnp.log1p(jnp.exp(-jnp.abs(pred))))
+    valid *= (truth_data != _OutputClass.MASKED).astype(jnp.float32)
+  elif truth.type_ == _Type.MASK_ONE:
+    loss = -jnp.sum(truth_data * jax.nn.log_softmax(pred),
+                    axis=-1, keepdims=True)
+    if decode_diffs:
+      loss *= gt_diff
+  elif truth.type_ == _Type.CATEGORICAL:
+    valid = jnp.squeeze(valid, -1) * jnp.any(
+        truth_data == _OutputClass.POSITIVE, axis=-1)
+    masked_truth = truth_data * (
+        truth_data != _OutputClass.MASKED).astype(jnp.float32)
+    loss = -jnp.sum(masked_truth * jax.nn.log_softmax(pred), axis=-1)
+    if decode_diffs:
+      loss *= gt_diff
+  elif truth.type_ == _Type.POINTER:
+    loss = -jnp.sum(hk.one_hot(truth_data, nb_nodes) * jax.nn.log_softmax(pred),
+                    axis=-1)
+    if decode_diffs:
+      loss *= gt_diff
+  else:
+    raise ValueError('Incorrect type')
+
+  total_valid = jnp.maximum(jnp.sum(jnp.broadcast_to(valid, loss.shape)), EPS)
+  loss = jnp.sum(jnp.where(valid, loss, 0.0)) / total_valid
+  return loss
+
+
 def hint_loss(
     truth: _DataPoint,
-    preds: _Trajectories,
-    gt_diffs: _Trajectories,
+    preds: List[_Array],
+    gt_diffs: _PredTrajectories,
     lengths: _Array,
     nb_nodes: int,
     decode_diffs: bool,
     verbose: bool = False,
 ):
-  """Calculates hint losses."""
+  """Hint loss for full-sample training."""
   total_loss = 0.
   verbose_loss = {}
   length = truth.data.shape[0] - 1
@@ -127,14 +235,14 @@ def hint_loss(
 def _hint_loss(
     i: int,
     truth: _DataPoint,
-    preds: _Trajectories,
-    gt_diffs: _Trajectories,
+    preds: List[_Array],
+    gt_diffs: _PredTrajectories,
     lengths: _Array,
     nb_nodes: int,
     decode_diffs: bool,
 ) -> float:
   """Hint loss helper."""
-  pred = preds[i][truth.name]
+  pred = preds[i]
   is_not_done = _is_not_done_broadcast(lengths, i, truth.data[i + 1])
 
   if truth.type_ == _Type.SCALAR:

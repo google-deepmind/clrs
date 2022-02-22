@@ -451,7 +451,7 @@ class BaselineModel(model.Model):
       for truth in feedback.outputs:
         total_loss += losses.output_loss(
             truth=truth,
-            preds=output_preds,
+            pred=output_preds[truth.name],
             nb_nodes=nb_nodes,
         )
 
@@ -468,7 +468,7 @@ class BaselineModel(model.Model):
         for truth in feedback.features.hints:
           total_loss += losses.hint_loss(
               truth=truth,
-              preds=hint_preds,
+              preds=[x[truth.name] for x in hint_preds],
               gt_diffs=gt_diffs,
               lengths=lengths,
               nb_nodes=nb_nodes,
