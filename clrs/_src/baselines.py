@@ -19,16 +19,15 @@ import functools
 import os
 import pickle
 
-from typing import Dict, Tuple, List, Optional
+from typing import Dict, Tuple
 
 import chex
 
 from clrs._src import decoders
-from clrs._src import encoders
 from clrs._src import losses
 from clrs._src import model
+from clrs._src import nets
 from clrs._src import probing
-from clrs._src import processors
 from clrs._src import samplers
 from clrs._src import specs
 
@@ -41,6 +40,7 @@ import optax
 _Array = chex.Array
 _DataPoint = probing.DataPoint
 _Features = samplers.Features
+_FeaturesChunked = samplers.FeaturesChunked
 _Feedback = samplers.Feedback
 _Location = specs.Location
 _Seed = jnp.ndarray
@@ -49,316 +49,6 @@ _Stage = specs.Stage
 _Trajectory = samplers.Trajectory
 _Type = specs.Type
 _OutputClass = specs.OutputClass
-
-
-@chex.dataclass
-class _MessagePassingScanState:
-  hint_preds: chex.Array
-  diff_logits: chex.Array
-  gt_diffs: chex.Array
-  output_preds: chex.Array
-  hiddens: chex.Array
-  lstm_state: Optional[hk.LSTMState]
-
-
-class Net(hk.Module):
-  """Building blocks (networks) used to encode and decode messages."""
-
-  def __init__(
-      self,
-      spec: _Spec,
-      hidden_dim: int,
-      encode_hints: bool,
-      decode_hints: bool,
-      decode_diffs: bool,
-      kind: str,
-      use_lstm: bool,
-      dropout_prob: float,
-      nb_heads: int,
-      nb_dims=None,
-      name: str = 'net',
-  ):
-    """Constructs a `Net`."""
-    super().__init__(name=name)
-
-    self._dropout_prob = dropout_prob
-    self.spec = spec
-    self.hidden_dim = hidden_dim
-    self.encode_hints = encode_hints
-    self.decode_hints = decode_hints
-    self.decode_diffs = decode_diffs
-    self.kind = kind
-    self.nb_dims = nb_dims
-    self.use_lstm = use_lstm
-    self.nb_heads = nb_heads
-
-  def _msg_passing_step(self,
-                        mp_state: _MessagePassingScanState,
-                        i: int,
-                        hints: List[_DataPoint],
-                        repred: bool,
-                        lengths: chex.Array,
-                        nb_nodes: int,
-                        inputs: _Trajectory,
-                        first_step: bool = False):
-    if (not first_step) and repred and self.decode_hints:
-      decoded_hint = decoders.postprocess(self.spec, mp_state.hint_preds)
-      cur_hint = []
-      for hint in decoded_hint:
-        cur_hint.append(decoded_hint[hint])
-    else:
-      cur_hint = []
-      for hint in hints:
-        hint.data = jnp.asarray(hint.data)
-        _, loc, typ = self.spec[hint.name]
-        cur_hint.append(
-            probing.DataPoint(
-                name=hint.name, location=loc, type_=typ, data=hint.data[i]))
-
-    gt_diffs = None
-    if hints[0].data.shape[0] > 1 and self.decode_diffs:
-      gt_diffs = {
-          _Location.NODE: jnp.zeros((self.batch_size, nb_nodes)),
-          _Location.EDGE: jnp.zeros((self.batch_size, nb_nodes, nb_nodes)),
-          _Location.GRAPH: jnp.zeros((self.batch_size))
-      }
-      for hint in hints:
-        hint_cur = jax.lax.dynamic_index_in_dim(hint.data, i, 0, keepdims=False)
-        hint_nxt = jax.lax.dynamic_index_in_dim(
-            hint.data, i+1, 0, keepdims=False)
-        if len(hint_cur.shape) == len(gt_diffs[hint.location].shape):
-          hint_cur = jnp.expand_dims(hint_cur, -1)
-          hint_nxt = jnp.expand_dims(hint_nxt, -1)
-        gt_diffs[hint.location] += jnp.any(hint_cur != hint_nxt, axis=-1)
-      for loc in [_Location.NODE, _Location.EDGE, _Location.GRAPH]:
-        gt_diffs[loc] = (gt_diffs[loc] > 0.0).astype(jnp.float32) * 1.0
-
-    (hiddens, output_preds_cand, hint_preds, diff_logits,
-     lstm_state) = self._one_step_pred(
-         inputs, cur_hint, mp_state.hiddens, nb_nodes, mp_state.lstm_state)
-
-    if first_step:
-      output_preds = output_preds_cand
-    else:
-      output_preds = {}
-      for outp in mp_state.output_preds:
-        is_not_done = _is_not_done_broadcast(lengths, i,
-                                             output_preds_cand[outp])
-        output_preds[outp] = is_not_done * output_preds_cand[outp] + (
-            1.0 - is_not_done) * mp_state.output_preds[outp]
-
-    if self.decode_diffs:
-      if self.decode_hints:
-        if hints[0].data.shape[0] == 1 or repred:
-          diff_preds = {}
-          for loc in [_Location.NODE, _Location.EDGE, _Location.GRAPH]:
-            diff_preds[loc] = (diff_logits[loc] > 0.0).astype(jnp.float32) * 1.0
-        else:
-          diff_preds = gt_diffs
-        for hint in hints:
-          prev_hint = (
-              hint.data[0]
-              if first_step else mp_state.hint_preds[hint.name])
-          if first_step and hint.type_ == _Type.POINTER:
-            prev_hint = hk.one_hot(prev_hint, nb_nodes)
-          cur_diffs = diff_preds[hint.location]
-          while len(prev_hint.shape) > len(cur_diffs.shape):
-            cur_diffs = jnp.expand_dims(cur_diffs, -1)
-          hint_preds[hint.name] = (
-              cur_diffs * hint_preds[hint.name] + (1.0 - cur_diffs) * prev_hint)
-
-    new_mp_state = _MessagePassingScanState(
-        hint_preds=hint_preds, diff_logits=diff_logits, gt_diffs=gt_diffs,
-        output_preds=output_preds, hiddens=hiddens, lstm_state=lstm_state)
-
-    # Complying to jax.scan, the first returned value is the state we carry over
-    # the second value is the output that will be stacked over steps.
-    return new_mp_state, new_mp_state
-
-  def __call__(self, features: _Features, repred: bool):
-    """Network inference step."""
-    inputs = features.inputs
-    hints = features.hints
-    lengths = features.lengths
-
-    for inp in inputs:
-      if inp.location in [_Location.NODE, _Location.EDGE]:
-        self.batch_size = inp.data.shape[0]
-        nb_nodes = inp.data.shape[1]
-        break
-
-    # Construct encoders and decoders.
-    (self.encoders, self.decoders,
-     self.diff_decoders) = self._construct_encoders_decoders()
-    self.processor = processors.construct_processor(
-        kind=self.kind, hidden_dim=self.hidden_dim, nb_heads=self.nb_heads)
-
-    nb_mp_steps = max(1, hints[0].data.shape[0] - 1)
-    hiddens = jnp.zeros((self.batch_size, nb_nodes, self.hidden_dim))
-
-    # Optionally construct LSTM.
-    if self.use_lstm:
-      self.lstm = hk.LSTM(
-          hidden_size=self.hidden_dim,
-          name='processor_lstm')
-      lstm_state = self.lstm.initial_state(self.batch_size * nb_nodes)
-      lstm_state = jax.tree_multimap(
-          lambda x: jnp.reshape(x, [self.batch_size, nb_nodes, -1]), lstm_state)
-    else:
-      self.lstm = None
-      lstm_state = None
-
-    mp_state = _MessagePassingScanState(
-        hint_preds=None, diff_logits=None, gt_diffs=None,
-        output_preds=None, hiddens=hiddens, lstm_state=lstm_state)
-
-    # Do the first step outside of the scan because it has a different
-    # computation graph.
-    mp_state, _ = self._msg_passing_step(
-        mp_state,
-        i=0,
-        first_step=True,
-        hints=hints,
-        repred=repred,
-        inputs=inputs,
-        nb_nodes=nb_nodes,
-        lengths=lengths)
-
-    # Then scan through the rest.
-    scan_fn = functools.partial(
-        self._msg_passing_step,
-        first_step=False,
-        hints=hints,
-        repred=repred,
-        inputs=inputs,
-        nb_nodes=nb_nodes,
-        lengths=lengths)
-
-    _, output_mp_state = hk.scan(
-        scan_fn,
-        mp_state,
-        jnp.arange(nb_mp_steps - 1) + 1,
-        length=nb_mp_steps - 1)
-
-    output_mp_state = jax.tree_multimap(
-        lambda init, tail: jnp.concatenate([init[None], tail], axis=0),
-        mp_state, output_mp_state)
-
-    def invert(d):
-      """Dict of lists -> list of dicts."""
-      if d:
-        return [dict(zip(d, i)) for i in zip(*d.values())]
-
-    output_preds = invert(output_mp_state.output_preds)
-    hint_preds = invert(output_mp_state.hint_preds)
-    diff_logits = invert(output_mp_state.diff_logits)
-    gt_diffs = invert(output_mp_state.gt_diffs)
-
-    return output_preds[-1], hint_preds, diff_logits, gt_diffs
-
-  def _construct_encoders_decoders(self):
-    """Constructs encoders and decoders."""
-    encoders_ = {}
-    decoders_ = {}
-
-    for name, (stage, loc, t) in self.spec.items():
-      if stage == _Stage.INPUT or (stage == _Stage.HINT and self.encode_hints):
-        # Build input encoders.
-        encoders_[name] = encoders.construct_encoders(
-            loc, t, hidden_dim=self.hidden_dim)
-
-      if stage == _Stage.OUTPUT or (stage == _Stage.HINT and self.decode_hints):
-        # Build output decoders.
-        decoders_[name] = decoders.construct_decoders(
-            loc, t, hidden_dim=self.hidden_dim, nb_dims=self.nb_dims[name])
-
-    if self.decode_diffs:
-      # Optionally build diff decoders.
-      diff_decoders = decoders.construct_diff_decoders()
-
-    return encoders_, decoders_, diff_decoders
-
-  def _one_step_pred(
-      self,
-      inputs: _Trajectory,
-      hints: _Trajectory,
-      hidden: _Array,
-      nb_nodes: int,
-      lstm_state: Optional[hk.LSTMState],
-  ):
-    """Generates one-step predictions."""
-
-    # Initialise empty node/edge/graph features and adjacency matrix.
-    node_fts = jnp.zeros((self.batch_size, nb_nodes, self.hidden_dim))
-    edge_fts = jnp.zeros((self.batch_size, nb_nodes, nb_nodes, self.hidden_dim))
-    graph_fts = jnp.zeros((self.batch_size, self.hidden_dim))
-    adj_mat = jnp.repeat(
-        jnp.expand_dims(jnp.eye(nb_nodes), 0), self.batch_size, axis=0)
-
-    # ENCODE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # Encode node/edge/graph features from inputs and (optionally) hints.
-    trajectories = [inputs]
-    if self.encode_hints:
-      trajectories.append(hints)
-
-    for trajectory in trajectories:
-      for dp in trajectory:
-        try:
-          data = encoders.preprocess(dp, nb_nodes)
-          adj_mat = encoders.accum_adj_mat(dp, data, adj_mat)
-          encoder = self.encoders[dp.name]
-          edge_fts = encoders.accum_edge_fts(encoder, dp, data, edge_fts)
-          node_fts = encoders.accum_node_fts(encoder, dp, data, node_fts)
-          graph_fts = encoders.accum_graph_fts(encoder, dp, data, graph_fts)
-        except Exception as e:
-          raise Exception(f'Failed to process {dp}') from e
-
-    # PROCESS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    nxt_hidden = self.processor(
-        node_fts,
-        edge_fts,
-        graph_fts,
-        adj_mat,
-        hidden,
-        batch_size=self.batch_size,
-        nb_nodes=nb_nodes,
-    )
-    nxt_hidden = hk.dropout(hk.next_rng_key(), self._dropout_prob, nxt_hidden)
-
-    if self.use_lstm:
-      # lstm doesn't accept multiple batch dimensions (in our case, batch and
-      # nodes), so we vmap over the (first) batch dimension.
-      nxt_hidden, nxt_lstm_state = jax.vmap(self.lstm)(nxt_hidden, lstm_state)
-    else:
-      nxt_lstm_state = None
-
-    h_t = jnp.concatenate([node_fts, hidden, nxt_hidden], axis=-1)
-
-    # DECODE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # Decode features and (optionally) hints.
-    hint_preds, output_preds = decoders.decode_fts(
-        decoders=self.decoders,
-        spec=self.spec,
-        h_t=h_t,
-        adj_mat=adj_mat,
-        edge_fts=edge_fts,
-        graph_fts=graph_fts,
-        inf_bias=self.processor.inf_bias,
-        inf_bias_edge=self.processor.inf_bias_edge,
-    )
-
-    # Optionally decode diffs.
-    diff_preds = decoders.maybe_decode_diffs(
-        diff_decoders=self.diff_decoders,
-        h_t=h_t,
-        edge_fts=edge_fts,
-        graph_fts=graph_fts,
-        batch_size=self.batch_size,
-        nb_nodes=nb_nodes,
-        decode_diffs=self.decode_diffs,
-    )
-
-    return nxt_hidden, output_preds, hint_preds, diff_preds, nxt_lstm_state
 
 
 class BaselineModel(model.Model):
@@ -402,15 +92,21 @@ class BaselineModel(model.Model):
     for outp in dummy_trajectory.outputs:
       self.nb_dims[outp.name] = outp.data.shape[-1]
 
+    self._create_net_fns(hidden_dim, encode_hints, kind,
+                         use_lstm, dropout_prob, nb_heads)
+    self.params = None
+    self.opt_state = None
+
+  def _create_net_fns(self, hidden_dim, encode_hints, kind,
+                      use_lstm, dropout_prob, nb_heads):
     def _use_net(*args, **kwargs):
-      return Net(spec, hidden_dim, encode_hints, decode_hints, decode_diffs,
-                 kind, use_lstm, dropout_prob, nb_heads, self.nb_dims)(*args,
-                                                                       **kwargs)
+      return nets.Net(self.spec, hidden_dim, encode_hints,
+                      self.decode_hints, self.decode_diffs,
+                      kind, use_lstm, dropout_prob,
+                      nb_heads, self.nb_dims)(*args, **kwargs)
 
     self.net_fn = hk.transform(_use_net)
     self.net_fn_apply = jax.jit(self.net_fn.apply, static_argnums=3)
-    self.params = None
-    self.opt_state = None
 
   def init(self, features: _Features, seed: _Seed):
     self.params = self.net_fn.init(jax.random.PRNGKey(seed), features, True)
@@ -443,7 +139,7 @@ class BaselineModel(model.Model):
       (output_preds, hint_preds, diff_logits,
        gt_diffs) = self.net_fn_apply(params, rng_key, feedback.features, False)
 
-      nb_nodes = _nb_nodes(feedback)
+      nb_nodes = _nb_nodes(feedback, is_chunked=False)
       lengths = feedback.features.lengths
       total_loss = 0.0
 
@@ -479,6 +175,11 @@ class BaselineModel(model.Model):
 
     # Calculate and apply gradients.
     lss, grads = jax.value_and_grad(loss)(params, rng_key, feedback)
+    new_params, opt_state = self._update_params(params, grads, opt_state)
+
+    return new_params, opt_state, lss
+
+  def _update_params(self, params, grads, opt_state):
     updates, opt_state = self.opt.update(grads, opt_state)
     if self._freeze_processor:
       params_subset = _filter_processor(params)
@@ -488,13 +189,13 @@ class BaselineModel(model.Model):
     else:
       new_params = optax.apply_updates(params, updates)
 
-    return new_params, opt_state, lss
+    return new_params, opt_state
 
   def verbose_loss(self, feedback: _Feedback, extra_info) -> Dict[str, _Array]:
     """Gets verbose loss information."""
     hint_preds, diff_logits, gt_diffs = extra_info
 
-    nb_nodes = _nb_nodes(feedback)
+    nb_nodes = _nb_nodes(feedback, is_chunked=False)
     lengths = feedback.features.lengths
     losses_ = {}
 
@@ -545,10 +246,124 @@ class BaselineModel(model.Model):
       pickle.dump(to_save, f)
 
 
-def _nb_nodes(feedback: _Feedback):
+class BaselineModelChunked(BaselineModel):
+  """Model that processes time-chunked data.
+
+    Unlike `BaselineModel`, which processes full samples, `BaselineModelChunked`
+    processes fixed-timelength chunks of data. Each tensor of inputs and hints
+    has dimensions chunk_length x batch_size x ... The beginning of a new
+    sample withing the chunk is signalled by a tensor called `is_first` of
+    dimensions chunk_length x batch_size.
+
+    The chunked model is intended for training. For validation and test, use
+    `BaselineModel`.
+  """
+
+  def _create_net_fns(self, hidden_dim, encode_hints, kind,
+                      use_lstm, dropout_prob, nb_heads):
+    def _use_net(*args, **kwargs):
+      return nets.NetChunked(
+          self.spec, hidden_dim, encode_hints,
+          self.decode_hints, self.decode_diffs,
+          kind, use_lstm, dropout_prob,
+          nb_heads, self.nb_dims)(*args, **kwargs)
+
+    self.net_fn = hk.transform(_use_net)
+    self.net_fn_apply = jax.jit(
+        functools.partial(self.net_fn.apply, init_mp_state=False),
+        static_argnums=4)
+
+  def _init_mp_state(self, features: _FeaturesChunked, rng_key: _Array):
+    empty_mp_state = nets.MessagePassingStateChunked(
+        inputs=None, hints=None, is_first=None,
+        hint_preds=None, hiddens=None, lstm_state=None)
+    dummy_params = self.net_fn.init(
+        rng_key, features, empty_mp_state, False, init_mp_state=True)
+    _, mp_state = self.net_fn.apply(
+        dummy_params, rng_key, features, empty_mp_state, False,
+        init_mp_state=True)
+    return mp_state
+
+  def init(self, features: _FeaturesChunked, seed: _Seed):
+    self.mp_state = self._init_mp_state(features, jax.random.PRNGKey(seed))
+    self.params = self.net_fn.init(
+        jax.random.PRNGKey(seed), features, self.mp_state,
+        True, init_mp_state=False)
+    self.opt_state = self.opt.init(self.params)
+
+  def predict(self, rng_key: hk.PRNGSequence, features: _FeaturesChunked):
+    """Inference not implemented. Chunked model intended for training only."""
+    raise NotImplementedError
+
+  def update(
+      self,
+      rng_key: hk.PRNGSequence,
+      params: hk.Params,
+      opt_state: optax.OptState,
+      feedback: _Feedback,
+  ) -> Tuple[hk.Params, optax.OptState, _Array]:
+    """Model update step."""
+
+    def loss(params, rng_key, feedback):
+      ((output_preds, hint_preds, diff_logits, gt_diffs),
+       mp_state) = self.net_fn_apply(params, rng_key, feedback.features,
+                                     self.mp_state, False)
+
+      nb_nodes = _nb_nodes(feedback, is_chunked=True)
+
+      total_loss = 0.0
+      is_first = feedback.features.is_first
+      is_last = feedback.features.is_last
+
+      # Calculate output loss.
+      for truth in feedback.outputs:
+        total_loss += losses.output_loss_chunked(
+            truth=truth,
+            pred=output_preds[truth.name],
+            is_last=is_last,
+            nb_nodes=nb_nodes,
+        )
+
+      # Optionally accumulate diff losses.
+      if self.decode_diffs:
+        total_loss += losses.diff_loss_chunked(
+            diff_logits=diff_logits,
+            gt_diffs=gt_diffs,
+            is_first=is_first,
+        )
+
+      # Optionally accumulate hint losses.
+      if self.decode_hints:
+        for truth in feedback.features.hints:
+          loss = losses.hint_loss_chunked(
+              truth=truth,
+              pred=hint_preds[truth.name],
+              gt_diffs=gt_diffs,
+              is_first=is_first,
+              nb_nodes=nb_nodes,
+              decode_diffs=self.decode_diffs,
+          )
+          total_loss += loss
+
+      return total_loss, (mp_state,)
+
+    (lss, (self.mp_state,)), grads = jax.value_and_grad(
+        loss, has_aux=True)(params, rng_key, feedback)
+    new_params, opt_state = self._update_params(params, grads, opt_state)
+
+    return new_params, opt_state, lss
+
+  def verbose_loss(self, *args, **kwargs):
+    raise NotImplementedError
+
+
+def _nb_nodes(feedback: _Feedback, is_chunked) -> int:
   for inp in feedback.features.inputs:
     if inp.location in [_Location.NODE, _Location.EDGE]:
-      return inp.data.shape[1]
+      if is_chunked:
+        return inp.data.shape[2]  # inputs are time x batch x nodes x ...
+      else:
+        return inp.data.shape[1]  # inputs are batch x nodes x ...
   assert False
 
 

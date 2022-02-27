@@ -16,13 +16,17 @@
 """The CLRS Algorithmic Reasoning Benchmark."""
 
 from clrs._src.baselines import BaselineModel
-from clrs._src.baselines import Net
+from clrs._src.baselines import BaselineModelChunked
+from clrs._src.nets import Net
+from clrs._src.nets import NetChunked
 from clrs._src.processors import GAT
 from clrs._src.processors import MPNN
 
 __all__ = (
     "BaselineModel",
+    "BaselineModelChunked",
     "GAT",
     "MPNN",
     "Net",
+    "NetChunked",
 )
