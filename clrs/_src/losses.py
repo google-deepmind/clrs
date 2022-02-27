@@ -14,7 +14,7 @@
 # ==============================================================================
 """Utilities for calculating losses."""
 
-from typing import Dict, List
+from typing import Dict, List, Tuple
 import chex
 from clrs._src import probing
 from clrs._src import specs
@@ -158,45 +158,17 @@ def hint_loss_chunked(
     decode_diffs: bool,
 ):
   """Hint loss for time-chunked training."""
-  truth_data = truth.data
-  if decode_diffs:
-    gt_diff = gt_diffs[truth.location]
-  valid = (1 - _expand_to(is_first, truth_data)).astype(jnp.float32)
-  if truth.type_ == _Type.SCALAR:
-    loss = (pred - truth_data)**2
-    if decode_diffs:
-      loss *= gt_diff
-  elif truth.type_ == _Type.MASK:
-    if decode_diffs:
-      loss = (jnp.maximum(pred, 0) - pred * truth_data +
-              jnp.log1p(jnp.exp(-jnp.abs(pred))) * gt_diff)
-    else:
-      loss = (jnp.maximum(pred, 0) - pred * truth_data +
-              jnp.log1p(jnp.exp(-jnp.abs(pred))))
-    valid *= (truth_data != _OutputClass.MASKED).astype(jnp.float32)
-  elif truth.type_ == _Type.MASK_ONE:
-    loss = -jnp.sum(truth_data * jax.nn.log_softmax(pred),
-                    axis=-1, keepdims=True)
-    if decode_diffs:
-      loss *= gt_diff
-  elif truth.type_ == _Type.CATEGORICAL:
-    valid = jnp.squeeze(valid, -1) * jnp.any(
-        truth_data == _OutputClass.POSITIVE, axis=-1)
-    masked_truth = truth_data * (
-        truth_data != _OutputClass.MASKED).astype(jnp.float32)
-    loss = -jnp.sum(masked_truth * jax.nn.log_softmax(pred), axis=-1)
-    if decode_diffs:
-      loss *= gt_diff
-  elif truth.type_ == _Type.POINTER:
-    loss = -jnp.sum(hk.one_hot(truth_data, nb_nodes) * jax.nn.log_softmax(pred),
-                    axis=-1)
-    if decode_diffs:
-      loss *= gt_diff
-  else:
-    raise ValueError('Incorrect type')
+  loss, mask = _hint_loss(
+      truth_data=truth.data,
+      truth_type=truth.type_,
+      pred=pred,
+      nb_nodes=nb_nodes,
+  )
 
-  total_valid = jnp.maximum(jnp.sum(jnp.broadcast_to(valid, loss.shape)), EPS)
-  loss = jnp.sum(jnp.where(valid, loss, 0.0)) / total_valid
+  mask *= (1 - _expand_to(is_first, loss)).astype(jnp.float32)
+  if decode_diffs:
+    mask *= gt_diffs[truth.location]
+  loss = jnp.sum(loss * mask) / jnp.maximum(jnp.sum(mask), EPS)
   return loss
 
 
@@ -214,88 +186,57 @@ def hint_loss(
   verbose_loss = {}
   length = truth.data.shape[0] - 1
 
-  for i in range(length):
-    loss = _hint_loss(
-        i,
-        truth=truth,
-        preds=preds,
-        gt_diffs=gt_diffs,
-        lengths=lengths,
-        nb_nodes=nb_nodes,
-        decode_diffs=decode_diffs,
-    ) / length
-    if verbose:
-      verbose_loss[truth.name + '_%d' % i] = loss
-    else:
-      total_loss += loss
+  loss, mask = _hint_loss(
+      truth_data=truth.data[1:],
+      truth_type=truth.type_,
+      pred=jnp.stack(preds),
+      nb_nodes=nb_nodes,
+  )
+  mask *= _is_not_done_broadcast(lengths, jnp.arange(length)[:, None], loss)
+  if decode_diffs:
+    mask *= jnp.stack([g[truth.location] for g in gt_diffs])
+  loss = jnp.sum(loss * mask) / jnp.maximum(jnp.sum(mask), EPS)
+  if verbose:
+    verbose_loss[truth.name] = loss
+  else:
+    total_loss += loss
 
   return verbose_loss if verbose else total_loss
 
 
 def _hint_loss(
-    i: int,
-    truth: _DataPoint,
-    preds: List[_Array],
-    gt_diffs: _PredTrajectories,
-    lengths: _Array,
+    truth_data: _Array,
+    truth_type: str,
+    pred: _Array,
     nb_nodes: int,
-    decode_diffs: bool,
-) -> float:
+) -> Tuple[_Array, _Array]:
   """Hint loss helper."""
-  pred = preds[i]
-  is_not_done = _is_not_done_broadcast(lengths, i, truth.data[i + 1])
+  mask = None
+  if truth_type == _Type.SCALAR:
+    loss = (pred - truth_data)**2
 
-  if truth.type_ == _Type.SCALAR:
-    if decode_diffs:
-      total_loss = jnp.mean((pred - truth.data[i + 1])**2 *
-                            gt_diffs[i][truth.location] * is_not_done)
-    else:
-      total_loss = jnp.mean((pred - truth.data[i + 1])**2 * is_not_done)
+  elif truth_type == _Type.MASK:
+    loss = (jnp.maximum(pred, 0) - pred * truth_data +
+            jnp.log1p(jnp.exp(-jnp.abs(pred))))
+    mask = (truth_data != _OutputClass.MASKED).astype(jnp.float32)
 
-  elif truth.type_ == _Type.MASK:
-    if decode_diffs:
-      loss = (
-          jnp.maximum(pred, 0) - pred * truth.data[i + 1] +
-          jnp.log1p(jnp.exp(-jnp.abs(pred))) * gt_diffs[i][truth.location] *
-          is_not_done)
-    else:
-      loss = (
-          jnp.maximum(pred, 0) - pred * truth.data[i + 1] +
-          jnp.log1p(jnp.exp(-jnp.abs(pred))) * is_not_done)
-    mask = (truth.data[i + 1] != _OutputClass.MASKED).astype(jnp.float32)
-    total_loss = jnp.sum(loss * mask) / jnp.maximum(jnp.sum(mask), EPS)
+  elif truth_type == _Type.MASK_ONE:
+    loss = -jnp.sum(truth_data * jax.nn.log_softmax(pred), axis=-1,
+                    keepdims=True)
 
-  elif truth.type_ == _Type.MASK_ONE:
-    if decode_diffs:
-      total_loss = jnp.mean(-jnp.sum(
-          truth.data[i + 1] * jax.nn.log_softmax(pred) * is_not_done,
-          axis=-1,
-          keepdims=True) * gt_diffs[i][truth.location])
-    else:
-      total_loss = jnp.mean(-jnp.sum(
-          truth.data[i + 1] * jax.nn.log_softmax(pred) * is_not_done, axis=-1))
+  elif truth_type == _Type.CATEGORICAL:
+    loss = -jnp.sum(truth_data * jax.nn.log_softmax(pred), axis=-1)
+    mask = jnp.any(truth_data == _OutputClass.POSITIVE, axis=-1).astype(
+        jnp.float32)
 
-  elif truth.type_ == _Type.CATEGORICAL:
-    masked_truth = truth.data[i + 1] * (
-        truth.data[i + 1] != _OutputClass.MASKED).astype(jnp.float32)
-    loss = -jnp.sum(masked_truth * jax.nn.log_softmax(pred) * is_not_done,
-                    axis=-1)
-    if decode_diffs:
-      loss *= gt_diffs[i][truth.location]
-    total_unmasked = jnp.sum(truth.data[i + 1] == _OutputClass.POSITIVE)
-    total_loss = jnp.sum(loss) / jnp.maximum(total_unmasked, EPS)
+  elif truth_type == _Type.POINTER:
+    loss = -jnp.sum(
+        hk.one_hot(truth_data, nb_nodes) * jax.nn.log_softmax(pred),
+        axis=-1)
 
-  elif truth.type_ == _Type.POINTER:
-    if decode_diffs:
-      total_loss = jnp.mean(-jnp.sum(
-          hk.one_hot(truth.data[i + 1], nb_nodes) * jax.nn.log_softmax(pred),
-          axis=-1) * gt_diffs[i][truth.location] * is_not_done)
-    else:
-      total_loss = jnp.mean(-jnp.sum(
-          hk.one_hot(truth.data[i + 1], nb_nodes) * jax.nn.log_softmax(pred),
-          axis=-1) * is_not_done)
-
-  return total_loss
+  if mask is None:
+    mask = jnp.ones_like(loss)
+  return loss, mask
 
 
 def _is_not_done_broadcast(lengths, i, tensor):
