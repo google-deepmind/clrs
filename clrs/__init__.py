@@ -19,6 +19,7 @@ from clrs import models
 from clrs._src import algorithms
 from clrs._src import processors
 from clrs._src.dataset import CLRSDataset
+from clrs._src.dataset import create_chunked_dataset
 from clrs._src.dataset import create_dataset
 from clrs._src.model import evaluate
 from clrs._src.model import Model
@@ -41,6 +42,7 @@ __version__ = "0.0.2"
 __all__ = (
     "build_sampler",
     "CLRS30",
+    "create_chunked_dataset",
     "create_dataset",
     "DataPoint",
     "evaluate",

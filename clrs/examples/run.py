@@ -24,6 +24,7 @@ from absl import logging
 
 import clrs
 import jax
+import jax.numpy as jnp
 import requests
 import tensorflow as tf
 
@@ -32,8 +33,20 @@ flags.DEFINE_string('algorithm', 'bfs', 'Which algorithm to run.')
 flags.DEFINE_integer('seed', 42, 'Random seed to set')
 
 flags.DEFINE_integer('batch_size', 32, 'Batch size used for training.')
-flags.DEFINE_integer('train_steps', 5000, 'Number of training steps.')
-flags.DEFINE_integer('log_every', 10, 'Logging frequency.')
+flags.DEFINE_boolean('chunked_training', False,
+                     'Whether to use chunking for training.')
+flags.DEFINE_integer('chunk_length', 100,
+                     'Time chunk length used for training (if '
+                     '`chunked_training` is True.')
+flags.DEFINE_integer('train_items', 160000,
+                     'Number of items (i.e., individual examples, possibly '
+                     'repeated) processed during training. With non-chunked'
+                     'training, this is the number of training batches times '
+                     'the number of training steps. For chunked training, '
+                     'as many chunks will be processed as needed to get these '
+                     'many full examples.')
+flags.DEFINE_integer('eval_every', 320,
+                     'Logging frequency (in training examples).')
 flags.DEFINE_boolean('verbose_logging', False, 'Whether to log aux losses.')
 
 flags.DEFINE_integer('hidden_size', 128,
@@ -71,6 +84,25 @@ CLRS_FOLDER = 'CLRS30'
 DATASET_GCP_URL = f'https://storage.googleapis.com/dm-clrs/{CLRS_FILE_NAME}'
 
 
+def unpack(v):
+  try:
+    return v.item()  # DeviceArray
+  except AttributeError:
+    return v
+
+
+def evaluate(rng_key, model, feedback, extras=None, verbose=False):
+  """Evaluates a model on feedback."""
+  out = {}
+  predictions, aux = model.predict(rng_key, feedback.features)
+  out.update(clrs.evaluate(feedback, predictions))
+  if extras:
+    out.update(extras)
+  if verbose:
+    out.update(model.verbose_loss(feedback, aux))
+  return {k: unpack(v) for k, v in out.items()}
+
+
 def download_dataset():
   """Downloads CLRS30 dataset."""
   request = requests.get(DATASET_GCP_URL, allow_redirects=True)
@@ -95,23 +127,28 @@ def main(unused_argv):
     logging.info('Dataset not found in %s. Downloading...', clrs_dataset_path)
     download_dataset()
 
+  common_args = dict(folder=FLAGS.dataset_path,
+                     algorithm=FLAGS.algorithm,
+                     batch_size=FLAGS.batch_size)
   # Make full dataset pipeline run on CPU (including prefetching).
   with tf.device('/cpu:0'):
-    train_sampler, spec = clrs.create_dataset(
-        folder=FLAGS.dataset_path, algorithm=FLAGS.algorithm,
-        split='train', batch_size=FLAGS.batch_size)
-    train_sampler = train_sampler.as_numpy_iterator()
-    val_sampler, _ = clrs.create_dataset(
-        folder=FLAGS.dataset_path, algorithm=FLAGS.algorithm,
-        split='val', batch_size=FLAGS.batch_size)
+    if FLAGS.chunked_training:
+      train_sampler, spec = clrs.create_chunked_dataset(
+          **common_args, split='train', chunk_length=FLAGS.chunk_length)
+      train_sampler_for_eval, _ = clrs.create_dataset(
+          split='train', **common_args)
+      train_sampler_for_eval = train_sampler_for_eval.as_numpy_iterator()
+    else:
+      train_sampler, spec = clrs.create_dataset(**common_args, split='train')
+      train_sampler = train_sampler.as_numpy_iterator()
+      train_sampler_for_eval = None
+
+    val_sampler, _ = clrs.create_dataset(**common_args, split='val')
     val_sampler = val_sampler.as_numpy_iterator()
-    test_sampler, _ = clrs.create_dataset(
-        folder=FLAGS.dataset_path, algorithm=FLAGS.algorithm,
-        split='test', batch_size=FLAGS.batch_size)
+    test_sampler, _ = clrs.create_dataset(**common_args, split='test')
     test_sampler = test_sampler.as_numpy_iterator()
 
-  model = clrs.models.BaselineModel(
-      spec=spec,
+  model_params = dict(
       hidden_dim=FLAGS.hidden_size,
       encode_hints=FLAGS.encode_hints,
       decode_hints=FLAGS.decode_hints,
@@ -123,66 +160,77 @@ def main(unused_argv):
       freeze_processor=FLAGS.freeze_processor,
       dropout_prob=FLAGS.dropout_prob,
       nb_heads=FLAGS.nb_heads,
-      dummy_trajectory=next(train_sampler),
+      )
+
+  eval_model = clrs.models.BaselineModel(
+      spec=spec,
+      dummy_trajectory=next(val_sampler),
+      **model_params
   )
-
-  def evaluate(rng_key, step, model, feedback, extras=None, verbose=False):
-    """Evaluates a model on feedback."""
-    examples_per_step = len(feedback.features.lengths)
-    out = {'step': step, 'examples_seen': step * examples_per_step}
-    predictions, aux = model.predict(rng_key, feedback.features)
-    out.update(clrs.evaluate(feedback, predictions))
-    if extras:
-      out.update(extras)
-    if verbose:
-      out.update(model.verbose_loss(feedback, aux))
-
-    def unpack(v):
-      try:
-        return v.item()  # DeviceArray
-      except AttributeError:
-        return v
-    return {k: unpack(v) for k, v in out.items()}
+  if FLAGS.chunked_training:
+    train_model = clrs.models.BaselineModelChunked(
+        spec=spec,
+        dummy_trajectory=next(train_sampler),
+        **model_params
+        )
+  else:
+    train_model = eval_model
 
   # Training loop.
   best_score = -1.0  # Ensure that there is overwriting
   rng_key = jax.random.PRNGKey(FLAGS.seed)
+  current_train_items = 0
+  step = 0
+  next_eval = 0
 
-  for step in range(FLAGS.train_steps):
+  while current_train_items < FLAGS.train_items:
     feedback = next(train_sampler)
 
     # Initialize model.
-    if step == 0:
+    if current_train_items == 0:
       t = time.time()
-      model.init(feedback.features, FLAGS.seed + 1)
+      train_model.init(feedback.features, FLAGS.seed + 1)
 
     # Training step step.
     rng_key, new_rng_key = jax.random.split(rng_key)
-    cur_loss = model.feedback(rng_key, feedback)
+    cur_loss = train_model.feedback(rng_key, feedback)
     rng_key = new_rng_key
-    if step == 0:
+    if current_train_items == 0:
       logging.info('Compiled feedback step in %f s.', time.time() - t)
+    if FLAGS.chunked_training:
+      examples_in_chunk = jnp.sum(feedback.features.is_last)
+    else:
+      examples_in_chunk = len(feedback.features.lengths)
+    current_train_items += examples_in_chunk
 
     # Periodically evaluate model.
-    if step % FLAGS.log_every == 0:
+    if current_train_items >= next_eval:
+      common_extras = {'examples_seen': current_train_items,
+                       'step': step}
+      eval_model.params = train_model.params
       # Training info.
+      if FLAGS.chunked_training:
+        train_feedback = next(train_sampler_for_eval)
+      else:
+        train_feedback = feedback
       rng_key, new_rng_key = jax.random.split(rng_key)
       train_stats = evaluate(
           rng_key,
-          step,
-          model,
-          feedback,
-          extras={'loss': cur_loss},
+          eval_model,
+          train_feedback,
+          extras=dict(loss=cur_loss, **common_extras),
           verbose=FLAGS.verbose_logging,
       )
       rng_key = new_rng_key
       logging.info('(train) step %d: %s', step, train_stats)
 
       # Validation info.
-      val_feedback = next(val_sampler)  # full-batch
+      val_feedback = next(val_sampler)
       rng_key, new_rng_key = jax.random.split(rng_key)
       val_stats = evaluate(
-          rng_key, step, model, val_feedback, verbose=FLAGS.verbose_logging)
+          rng_key, eval_model, val_feedback,
+          extras=common_extras,
+          verbose=FLAGS.verbose_logging)
       rng_key = new_rng_key
       logging.info('(val) step %d: %s', step, val_stats)
 
@@ -191,16 +239,21 @@ def main(unused_argv):
       if score > best_score:
         logging.info('Saving new checkpoint...')
         best_score = score
-        model.save_model('best.pkl')
+        train_model.save_model('best.pkl')
+      next_eval += FLAGS.eval_every
+
+    step += 1
 
   # Training complete, evaluate on test set.
   logging.info('Restoring best model from checkpoint...')
-  model.restore_model('best.pkl', only_load_processor=False)
+  eval_model.restore_model('best.pkl', only_load_processor=False)
 
   test_feedback = next(test_sampler)  # full-batch
   rng_key, new_rng_key = jax.random.split(rng_key)
   test_stats = evaluate(
-      rng_key, step, model, test_feedback, verbose=FLAGS.verbose_logging)
+      rng_key, eval_model, test_feedback,
+      extras=dict(examples_seen=current_train_items, step=step),
+      verbose=FLAGS.verbose_logging)
   rng_key = new_rng_key
   logging.info('(test) step %d: %s', step, test_stats)
 
