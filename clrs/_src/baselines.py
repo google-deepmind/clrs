@@ -19,7 +19,7 @@ import functools
 import os
 import pickle
 
-from typing import Dict, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import chex
 
@@ -56,27 +56,57 @@ class BaselineModel(model.Model):
 
   def __init__(
       self,
-      spec,
-      nb_heads=1,
-      hidden_dim=32,
-      kind='mpnn',
-      encode_hints=False,
-      decode_hints=True,
-      decode_diffs=False,
-      use_lstm=False,
-      learning_rate=0.005,
-      checkpoint_path='/tmp/clrs3',
-      freeze_processor=False,
-      dummy_trajectory=None,
-      dropout_prob=0.0,
-      name='base_model',
+      spec: Union[_Spec, List[_Spec]],
+      dummy_trajectory: Union[List[_Feedback], _Feedback],
+      nb_heads: int = 1,
+      hidden_dim: int = 32,
+      kind: str = 'mpnn',
+      encode_hints: bool = False,
+      decode_hints: bool = True,
+      decode_diffs: bool = False,
+      use_lstm: bool = False,
+      learning_rate: float = 0.005,
+      checkpoint_path: str = '/tmp/clrs3',
+      freeze_processor: bool = False,
+      dropout_prob: float = 0.0,
+      name: str = 'base_model',
   ):
+    """Constructor for BaselineModel.
+
+    The model consists of encoders, processor and decoders. It can train
+    and evaluate either a single algorithm or a set of algorithms; in the
+    latter case, a single processor is shared among all the algorithms, while
+    the encoders and decoders are separate for each algorithm.
+
+    Args:
+      spec: Either a single spec for one algorithm, or a list of specs for
+        multiple algorithms to be trained and evaluated.
+      dummy_trajectory: Either a single feedback batch, in the single-algorithm
+        case, or a list of feedback batches, in the multi-algorithm case, that
+        comply with the `spec` (or list of specs), to initialize network size.
+      nb_heads: Number of heads for GAT processors.
+      hidden_dim: Size of the hidden state of the model, i.e., size of the
+        message-passing vectors.
+      kind: Type of processor (see `processors.py`).
+      encode_hints: Whether to provide hints as model inputs.
+      decode_hints: Whether to provide hints as model outputs.
+      decode_diffs: Whether to predict masks within the model.
+      use_lstm: Whether to insert an LSTM after message passing.
+      learning_rate: Learning rate for training.
+      checkpoint_path: Path for loading/saving checkpoints.
+      freeze_processor: If True, the processor weights will be frozen and
+        only encoders and decoders (and, if used, the lstm) will be trained.
+      dropout_prob: Dropout rate in the message-passing stage.
+      name: Model name.
+
+    Raises:
+      ValueError: if `encode_hints=True` and `decode_hints=False`.
+    """
     super(BaselineModel, self).__init__(spec=spec)
 
     if encode_hints and not decode_hints:
       raise ValueError('`encode_hints=True`, `decode_hints=False` is invalid.')
 
-    self.spec = spec
     self.decode_hints = decode_hints
     self.decode_diffs = decode_diffs
     self.checkpoint_path = checkpoint_path
@@ -84,45 +114,70 @@ class BaselineModel(model.Model):
     self._freeze_processor = freeze_processor
     self.opt = optax.adam(learning_rate)
 
-    self.nb_dims = {}
-    for inp in dummy_trajectory.features.inputs:
-      self.nb_dims[inp.name] = inp.data.shape[-1]
-    for hint in dummy_trajectory.features.hints:
-      self.nb_dims[hint.name] = hint.data.shape[-1]
-    for outp in dummy_trajectory.outputs:
-      self.nb_dims[outp.name] = outp.data.shape[-1]
+    self.nb_dims = []
+    if isinstance(dummy_trajectory, _Feedback):
+      assert len(self._spec) == 1
+      dummy_trajectory = [dummy_trajectory]
+    for traj in dummy_trajectory:
+      nb_dims = {}
+      for inp in traj.features.inputs:
+        nb_dims[inp.name] = inp.data.shape[-1]
+      for hint in traj.features.hints:
+        nb_dims[hint.name] = hint.data.shape[-1]
+      for outp in traj.outputs:
+        nb_dims[outp.name] = outp.data.shape[-1]
+      self.nb_dims.append(nb_dims)
 
     self._create_net_fns(hidden_dim, encode_hints, kind,
                          use_lstm, dropout_prob, nb_heads)
     self.params = None
     self.opt_state = None
+    self.opt_state_skeleton = None
 
   def _create_net_fns(self, hidden_dim, encode_hints, kind,
                       use_lstm, dropout_prob, nb_heads):
     def _use_net(*args, **kwargs):
-      return nets.Net(self.spec, hidden_dim, encode_hints,
+      return nets.Net(self._spec, hidden_dim, encode_hints,
                       self.decode_hints, self.decode_diffs,
                       kind, use_lstm, dropout_prob,
                       nb_heads, self.nb_dims)(*args, **kwargs)
 
     self.net_fn = hk.transform(_use_net)
-    self.net_fn_apply = jax.jit(self.net_fn.apply, static_argnums=3)
+    self.net_fn_apply = jax.jit(self.net_fn.apply,
+                                static_argnames=['repred', 'algorithm_index'])
 
-  def init(self, features: _Features, seed: _Seed):
-    self.params = self.net_fn.init(jax.random.PRNGKey(seed), features, True)
+  def init(self, features: Union[_Features, List[_Features]], seed: _Seed):
+    if not isinstance(features, list):
+      assert len(self._spec) == 1
+      features = [features]
+    self.params = self.net_fn.init(jax.random.PRNGKey(seed), features, True, -1)
     self.opt_state = self.opt.init(self.params)
+    # We will use the optimizer state skeleton for traversal when we
+    # want to avoid updating the state of params of untrained algorithms.
+    self.opt_state_skeleton = self.opt.init(jnp.zeros(1))
 
-  def feedback(self, rng_key: hk.PRNGSequence, feedback: _Feedback) -> float:
+  def feedback(self, rng_key: hk.PRNGSequence, feedback: _Feedback,
+               algorithm_index: Optional[int] = None) -> float:
     """Advance to the next task, incorporating any available feedback."""
+    if algorithm_index is None:
+      assert len(self._spec) == 1
+      algorithm_index = 0
+
     self.params, self.opt_state, cur_loss = self.update(
-        rng_key, self.params, self.opt_state, feedback)
+        rng_key, self.params, self.opt_state, feedback, algorithm_index)
     return cur_loss
 
-  def predict(self, rng_key: hk.PRNGSequence, features: _Features):
+  def predict(self, rng_key: hk.PRNGSequence, features: _Features,
+              algorithm_index: Optional[int] = None):
     """Model inference step."""
+    if algorithm_index is None:
+      assert len(self._spec) == 1
+      algorithm_index = 0
+
     outs, hint_preds, diff_logits, gt_diff = self.net_fn_apply(
-        self.params, rng_key, features, True)
-    return decoders.postprocess(self.spec,
+        self.params, rng_key, [features],
+        repred=True, algorithm_index=algorithm_index)
+    return decoders.postprocess(self._spec[algorithm_index],
                                 outs), (hint_preds, diff_logits, gt_diff)
 
   def update(
@@ -131,13 +186,20 @@ class BaselineModel(model.Model):
       params: hk.Params,
       opt_state: optax.OptState,
       feedback: _Feedback,
+      algorithm_index: Optional[int] = None,
   ) -> Tuple[hk.Params, optax.OptState, _Array]:
     """Model update step."""
+
+    if algorithm_index is None:
+      assert len(self._spec) == 1
+      algorithm_index = 0
 
     def loss(params, rng_key, feedback):
       """Calculates model loss f(feedback; params)."""
       (output_preds, hint_preds, diff_logits,
-       gt_diffs) = self.net_fn_apply(params, rng_key, feedback.features, False)
+       gt_diffs) = self.net_fn_apply(params, rng_key, [feedback.features],
+                                     repred=False,
+                                     algorithm_index=algorithm_index)
 
       nb_nodes = _nb_nodes(feedback, is_chunked=False)
       lengths = feedback.features.lengths
@@ -174,13 +236,15 @@ class BaselineModel(model.Model):
       return total_loss
 
     # Calculate and apply gradients.
+    assert algorithm_index >= 0
     lss, grads = jax.value_and_grad(loss)(params, rng_key, feedback)
     new_params, opt_state = self._update_params(params, grads, opt_state)
 
     return new_params, opt_state, lss
 
   def _update_params(self, params, grads, opt_state):
-    updates, opt_state = self.opt.update(grads, opt_state)
+    updates, opt_state = filter_null_grads(
+        grads, self.opt, opt_state, self.opt_state_skeleton)
     if self._freeze_processor:
       params_subset = _filter_processor(params)
       updates_subset = _filter_processor(updates)
@@ -263,7 +327,7 @@ class BaselineModelChunked(BaselineModel):
                       use_lstm, dropout_prob, nb_heads):
     def _use_net(*args, **kwargs):
       return nets.NetChunked(
-          self.spec, hidden_dim, encode_hints,
+          self._spec, hidden_dim, encode_hints,
           self.decode_hints, self.decode_diffs,
           kind, use_lstm, dropout_prob,
           nb_heads, self.nb_dims)(*args, **kwargs)
@@ -271,27 +335,40 @@ class BaselineModelChunked(BaselineModel):
     self.net_fn = hk.transform(_use_net)
     self.net_fn_apply = jax.jit(
         functools.partial(self.net_fn.apply, init_mp_state=False),
-        static_argnums=4)
+        static_argnames=['repred', 'algorithm_index'])
 
-  def _init_mp_state(self, features: _FeaturesChunked, rng_key: _Array):
-    empty_mp_state = nets.MessagePassingStateChunked(
-        inputs=None, hints=None, is_first=None,
-        hint_preds=None, hiddens=None, lstm_state=None)
+  def _init_mp_state(self, features_list: List[_FeaturesChunked],
+                     rng_key: _Array):
+    def _empty_mp_state():
+      return nets.MessagePassingStateChunked(
+          inputs=None, hints=None, is_first=None,
+          hint_preds=None, hiddens=None, lstm_state=None)
+    empty_mp_states = [_empty_mp_state() for _ in range(len(features_list))]
     dummy_params = self.net_fn.init(
-        rng_key, features, empty_mp_state, False, init_mp_state=True)
-    _, mp_state = self.net_fn.apply(
-        dummy_params, rng_key, features, empty_mp_state, False,
-        init_mp_state=True)
-    return mp_state
+        rng_key, features_list, empty_mp_states, False,
+        init_mp_state=True, algorithm_index=-1)
+    _, mp_states = self.net_fn.apply(
+        dummy_params, rng_key, features_list, empty_mp_states, False,
+        init_mp_state=True, algorithm_index=-1)
+    return mp_states
 
-  def init(self, features: _FeaturesChunked, seed: _Seed):
-    self.mp_state = self._init_mp_state(features, jax.random.PRNGKey(seed))
+  def init(self, features: Union[_FeaturesChunked, List[_FeaturesChunked]],
+           seed: _Seed):
+    if not isinstance(features, list):
+      assert len(self._spec) == 1
+      features = [features]
+    self.mp_states = self._init_mp_state(features,
+                                         jax.random.PRNGKey(seed))
     self.params = self.net_fn.init(
-        jax.random.PRNGKey(seed), features, self.mp_state,
-        True, init_mp_state=False)
+        jax.random.PRNGKey(seed), features, self.mp_states,
+        True, init_mp_state=False, algorithm_index=-1)
     self.opt_state = self.opt.init(self.params)
+    # We will use the optimizer state skeleton for traversal when we
+    # want to avoid updating the state of params of untrained algorithms.
+    self.opt_state_skeleton = self.opt.init(jnp.zeros(1))
 
-  def predict(self, rng_key: hk.PRNGSequence, features: _FeaturesChunked):
+  def predict(self, rng_key: hk.PRNGSequence, features: _FeaturesChunked,
+              algorithm_index: Optional[int] = None):
     """Inference not implemented. Chunked model intended for training only."""
     raise NotImplementedError
 
@@ -301,13 +378,19 @@ class BaselineModelChunked(BaselineModel):
       params: hk.Params,
       opt_state: optax.OptState,
       feedback: _Feedback,
+      algorithm_index: Optional[int] = None,
   ) -> Tuple[hk.Params, optax.OptState, _Array]:
     """Model update step."""
 
+    if algorithm_index is None:
+      assert len(self._spec) == 1
+      algorithm_index = 0
     def loss(params, rng_key, feedback):
       ((output_preds, hint_preds, diff_logits, gt_diffs),
-       mp_state) = self.net_fn_apply(params, rng_key, feedback.features,
-                                     self.mp_state, False)
+       mp_state) = self.net_fn_apply(params, rng_key, [feedback.features],
+                                     [self.mp_states[algorithm_index]],
+                                     repred=False,
+                                     algorithm_index=algorithm_index)
 
       nb_nodes = _nb_nodes(feedback, is_chunked=True)
 
@@ -347,7 +430,7 @@ class BaselineModelChunked(BaselineModel):
 
       return total_loss, (mp_state,)
 
-    (lss, (self.mp_state,)), grads = jax.value_and_grad(
+    (lss, (self.mp_states[algorithm_index],)), grads = jax.value_and_grad(
         loss, has_aux=True)(params, rng_key, feedback)
     new_params, opt_state = self._update_params(params, grads, opt_state)
 
@@ -377,3 +460,53 @@ def _is_not_done_broadcast(lengths, i, tensor):
   while len(is_not_done.shape) < len(tensor.shape):
     is_not_done = jnp.expand_dims(is_not_done, -1)
   return is_not_done
+
+
+def filter_null_grads(grads, opt, opt_state, opt_state_skeleton):
+  """Compute updates ignoring params that have no gradients.
+
+  This prevents untrained params (e.g., encoders/decoders for algorithms
+  that are not being trained) to accumulate, e.g., momentum from spurious
+  zero gradients.
+
+  Note: this works as intended for "per-parameter" optimizer state, such as
+    momentum. However, when the optimizer has some global state (such as the
+    step counts in Adam), the global state will be updated every time,
+    affecting also future updates of parameters that had null gradients in the
+    current step.
+
+  Args:
+    grads: Gradients for all parameters.
+    opt: Optax optmizier.
+    opt_state: Optimizer state.
+    opt_state_skeleton: A "skeleton" of optimizer state that has been
+      initialized with scalar parameters. This serves to traverse each parameter
+      of the otpimizer state during the opt state update.
+  Returns:
+    Updates and new optimizer state, where the parameters with null gradient
+      have not been taken into account.
+  """
+  # Ignore params with no gradient.
+  masked_grads = jax.tree_map(lambda x: x if jnp.abs(x).sum() > 0.0 else None,
+                              grads)
+  flat_grads, treedef = jax.tree_util.tree_flatten(masked_grads)
+  flat_opt_state = jax.tree_util.tree_multimap(
+      lambda _, x: treedef.flatten_up_to(x) if not isinstance(x, _Array) else x,
+      opt_state_skeleton, opt_state)
+
+  # Compute updates only for the params with gradient.
+  flat_updates, flat_opt_state = opt.update(flat_grads, flat_opt_state)
+
+  def unflatten(flat, original):
+    """Restore tree structure, filling missing (None) leaves with original."""
+    if isinstance(flat, _Array):
+      return flat
+    return jax.tree_multimap(lambda x, y: x if y is None else y,
+                             original, treedef.unflatten(flat))
+
+  # Restore the state and updates tree structure.
+  new_opt_state = jax.tree_util.tree_multimap(
+      lambda _, x, y: unflatten(x, y),
+      opt_state_skeleton, flat_opt_state, opt_state)
+  updates = unflatten(flat_updates, jax.tree_map(lambda x: 0., grads))
+  return updates, new_opt_state

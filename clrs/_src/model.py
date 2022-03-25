@@ -16,7 +16,7 @@
 """Model base classes and utilities."""
 
 import abc
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Union
 
 from clrs._src import probing
 from clrs._src import samplers
@@ -30,8 +30,10 @@ Result = Dict[str, probing.DataPoint]
 class Model(abc.ABC):
   """Abstract base class for CLRS3-B models."""
 
-  def __init__(self, spec: specs.Spec):
+  def __init__(self, spec: Union[specs.Spec, List[specs.Spec]]):
     """Set up the problem, prepare to predict on first task."""
+    if not isinstance(spec, list):
+      spec = [spec]
     self._spec = spec
 
   @abc.abstractmethod
