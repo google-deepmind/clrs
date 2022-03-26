@@ -55,14 +55,23 @@ flags.DEFINE_float('learning_rate', 0.003, 'Learning rate to use.')
 flags.DEFINE_float('dropout_prob', 0.0, 'Dropout rate to use.')
 flags.DEFINE_integer('nb_heads', 1, 'Number of heads for GAT processors')
 
-flags.DEFINE_boolean('encode_hints', True,
-                     'Whether to provide hints as model inputs.')
-flags.DEFINE_boolean('decode_hints', True,
-                     'Whether to provide hints as model outputs.')
+flags.DEFINE_enum('hint_mode', 'encoded_decoded',
+                  ['encoded_decoded', 'decoded_only', 'none'],
+                  'How should hints be used? Note, each mode defines a '
+                  'separate task, with various difficulties. `encoded_decoded` '
+                  'requires the model to explicitly materialise hint sequences '
+                  'and therefore is hardest, but also most aligned to the '
+                  'underlying algorithmic rule. Hence, `encoded_decoded` '
+                  'should be treated as the default mode for our benchmark. '
+                  'In `decoded_only`, hints are only used for defining '
+                  'reconstruction losses. Often, this will perform well, but '
+                  'note that we currently do not make any efforts to '
+                  'counterbalance the various hint losses. Hence, for certain '
+                  'tasks, the best performance will now be achievable with no '
+                  'hint usage at all (`none`).')
+
 flags.DEFINE_boolean('use_lstm', False,
                      'Whether to insert an LSTM after message passing.')
-flags.DEFINE_boolean('decode_diffs', True,
-                     'Whether to predict masks within the model.')
 flags.DEFINE_enum(
     'processor_type', 'mpnn',
     ['deepsets', 'mpnn', 'pgn', 'pgn_mask',
@@ -127,6 +136,21 @@ def main(unused_argv):
     logging.info('Dataset not found in %s. Downloading...', clrs_dataset_path)
     download_dataset()
 
+  if FLAGS.hint_mode == 'encoded_decoded':
+    encode_hints = True
+    decode_hints = True
+    decode_diffs = True
+  elif FLAGS.hint_mode == 'decoded_only':
+    encode_hints = False
+    decode_hints = True
+    decode_diffs = True
+  elif FLAGS.hint_mode == 'none':
+    encode_hints = False
+    decode_hints = False
+    decode_diffs = False
+  else:
+    raise ValueError('Hint mode not in {encoded_decoded, decoded_only, none}.')
+
   common_args = dict(folder=FLAGS.dataset_path,
                      algorithm=FLAGS.algorithm,
                      batch_size=FLAGS.batch_size)
@@ -150,9 +174,9 @@ def main(unused_argv):
 
   model_params = dict(
       hidden_dim=FLAGS.hidden_size,
-      encode_hints=FLAGS.encode_hints,
-      decode_hints=FLAGS.decode_hints,
-      decode_diffs=FLAGS.decode_diffs,
+      encode_hints=encode_hints,
+      decode_hints=decode_hints,
+      decode_diffs=decode_diffs,
       use_lstm=FLAGS.use_lstm,
       kind=FLAGS.processor_type,
       learning_rate=FLAGS.learning_rate,
