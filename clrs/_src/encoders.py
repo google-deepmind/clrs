@@ -14,6 +14,7 @@
 # ==============================================================================
 """Encoder utilities."""
 
+import functools
 import chex
 from clrs._src import probing
 from clrs._src import specs
@@ -27,12 +28,13 @@ _Spec = specs.Spec
 _Type = specs.Type
 
 
-def construct_encoders(loc: str, t: str, hidden_dim: int):
+def construct_encoders(loc: str, t: str, hidden_dim: int, name: str):
   """Constructs encoders."""
-  encoders = [hk.Linear(hidden_dim)]
+  linear = functools.partial(hk.Linear, name=f'{name}_enc_linear')
+  encoders = [linear(hidden_dim)]
   if loc == _Location.EDGE and t == _Type.POINTER:
     # Edge pointers need two-way encoders.
-    encoders.append(hk.Linear(hidden_dim))
+    encoders.append(linear(hidden_dim))
 
   return encoders
 

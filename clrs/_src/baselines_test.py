@@ -241,30 +241,15 @@ class BaselinesTest(parameterized.TestCase):
     # Test that non-changing parameters correspond to encoders/decoders
     # associated with the non-trained algorithms
     unchanged = [[k for k in pc if pc[k] == 0] for pc in param_changes]
-    assert all(['_construct_encoders_decoders' in x
-                for x in jax.tree_flatten(unchanged)[0]])
 
-    def _get_module_idx(param_name, module_name='linear'):
-      idx = param_name.find(module_name) + len(module_name)
-      return 0 if idx == len(param_name) else int(param_name[idx+1:])
+    def _get_other_algos(algo_idx, modules):
+      return set([k for k in modules if '_construct_encoders_decoders' in k
+                  and f'algo_{algo_idx}' not in k])
 
-    def _assert_consecutive(idx, start):
-      np.testing.assert_array_equal(sorted(list(idx)),
-                                    np.arange(start, start + len(idx)))
-
-    # Check that the encoder/decoder parameters changed by each algorithm
-    # are disjoint and consecutive (because the modules are all linear
-    # and created in algorithm order)
-    changed_ids = jax.tree_map(_get_module_idx, unchanged)
-    unchanged_01 = set(changed_ids[0]).intersection(changed_ids[1])
-    unchanged_02 = set(changed_ids[0]).intersection(changed_ids[2])
-    unchanged_12 = set(changed_ids[1]).intersection(changed_ids[2])
-    assert not unchanged_01.intersection(unchanged_02)
-    assert not unchanged_01.intersection(unchanged_12)
-    assert not unchanged_02.intersection(unchanged_12)
-    _assert_consecutive(unchanged_12, 0)
-    _assert_consecutive(unchanged_02, len(unchanged_12))
-    _assert_consecutive(unchanged_01, len(unchanged_12) + len(unchanged_02))
+    for algo_idx in range(len(algos)):
+      expected_unchanged = _get_other_algos(algo_idx, baseline.params.keys())
+      self.assertNotEmpty(expected_unchanged)
+      self.assertSetEqual(expected_unchanged, set(unchanged[algo_idx]))
 
 
 if __name__ == '__main__':

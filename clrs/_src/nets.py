@@ -330,20 +330,23 @@ class Net(hk.Module):
             stage == _Stage.HINT and self.encode_hints):
           # Build input encoders.
           enc[name] = encoders.construct_encoders(
-              loc, t, hidden_dim=self.hidden_dim)
+              loc, t, hidden_dim=self.hidden_dim,
+              name=f'algo_{algo_idx}_{name}')
 
         if stage == _Stage.OUTPUT or (
             stage == _Stage.HINT and self.decode_hints):
           # Build output decoders.
           dec[name] = decoders.construct_decoders(
               loc, t, hidden_dim=self.hidden_dim,
-              nb_dims=self.nb_dims[algo_idx][name])
+              nb_dims=self.nb_dims[algo_idx][name],
+              name=f'algo_{algo_idx}_{name}')
       encoders_.append(enc)
       decoders_.append(dec)
 
       if self.decode_diffs:
         # Optionally build diff decoders.
-        diff_decoders.append(decoders.construct_diff_decoders())
+        diff_decoders.append(
+            decoders.construct_diff_decoders(name=f'algo_{algo_idx}'))
 
     return encoders_, decoders_, diff_decoders
 

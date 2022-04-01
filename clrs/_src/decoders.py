@@ -14,6 +14,7 @@
 # ==============================================================================
 """decoders utilities."""
 
+import functools
 from typing import Dict
 import chex
 from clrs._src import probing
@@ -31,40 +32,42 @@ _Type = specs.Type
 _BIG_NUMBER = 1e5
 
 
-def construct_decoders(loc: str, t: str, hidden_dim: int, nb_dims: int):
+def construct_decoders(loc: str, t: str, hidden_dim: int, nb_dims: int,
+                       name: str):
   """Constructs decoders."""
+  linear = functools.partial(hk.Linear, name=f"{name}_dec_linear")
   if loc == _Location.NODE:
     # Node decoders.
     if t in [_Type.SCALAR, _Type.MASK, _Type.MASK_ONE]:
-      decoders = (hk.Linear(1),)
+      decoders = (linear(1),)
     elif t == _Type.CATEGORICAL:
-      decoders = (hk.Linear(nb_dims),)
+      decoders = (linear(nb_dims),)
     elif t == _Type.POINTER:
-      decoders = (hk.Linear(hidden_dim), hk.Linear(hidden_dim))
+      decoders = (linear(hidden_dim), linear(hidden_dim))
     else:
       raise ValueError(f"Invalid Type {t}")
 
   elif loc == _Location.EDGE:
     # Edge decoders.
     if t in [_Type.SCALAR, _Type.MASK, _Type.MASK_ONE]:
-      decoders = (hk.Linear(1), hk.Linear(1), hk.Linear(1))
+      decoders = (linear(1), linear(1), linear(1))
     elif t == _Type.CATEGORICAL:
-      decoders = (hk.Linear(nb_dims), hk.Linear(nb_dims), hk.Linear(nb_dims))
+      decoders = (linear(nb_dims), linear(nb_dims), linear(nb_dims))
     elif t == _Type.POINTER:
-      decoders = (hk.Linear(hidden_dim), hk.Linear(hidden_dim),
-                  hk.Linear(hidden_dim), hk.Linear(hidden_dim))
+      decoders = (linear(hidden_dim), linear(hidden_dim),
+                  linear(hidden_dim), linear(hidden_dim))
     else:
       raise ValueError(f"Invalid Type {t}")
 
   elif loc == _Location.GRAPH:
     # Graph decoders.
     if t in [_Type.SCALAR, _Type.MASK, _Type.MASK_ONE]:
-      decoders = (hk.Linear(1), hk.Linear(1))
+      decoders = (linear(1), linear(1))
     elif t == _Type.CATEGORICAL:
-      decoders = (hk.Linear(nb_dims), hk.Linear(nb_dims))
+      decoders = (linear(nb_dims), linear(nb_dims))
     elif t == _Type.POINTER:
-      decoders = (hk.Linear(hidden_dim), hk.Linear(hidden_dim),
-                  hk.Linear(hidden_dim))
+      decoders = (linear(hidden_dim), linear(hidden_dim),
+                  linear(hidden_dim))
     else:
       raise ValueError(f"Invalid Type {t}")
 
@@ -74,12 +77,13 @@ def construct_decoders(loc: str, t: str, hidden_dim: int, nb_dims: int):
   return decoders
 
 
-def construct_diff_decoders():
+def construct_diff_decoders(name: str):
   """Constructs diff decoders."""
+  linear = functools.partial(hk.Linear, name=f"{name}_diffdec_linear")
   decoders = {}
-  decoders[_Location.NODE] = hk.Linear(1)
-  decoders[_Location.EDGE] = (hk.Linear(1), hk.Linear(1), hk.Linear(1))
-  decoders[_Location.GRAPH] = (hk.Linear(1), hk.Linear(1))
+  decoders[_Location.NODE] = linear(1)
+  decoders[_Location.EDGE] = (linear(1), linear(1), linear(1))
+  decoders[_Location.GRAPH] = (linear(1), linear(1))
 
   return decoders
 
