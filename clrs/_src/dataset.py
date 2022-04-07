@@ -68,14 +68,18 @@ class CLRSDataset(tfds.core.GeneratorBasedBuilder):
   _instantiated_dataset_name = ''
   _instantiated_dataset_split = ''
 
-  def _create_data(self, single_sample):
-    algorithm_name = '_'.join(self._builder_config.name.split('_')[:-1])
+  def _num_samples(self, algorithm_name):
     num_samples = samplers.CLRS30[self._builder_config.split]['num_samples']
     if self._builder_config.split != 'train':
       # Generate more samples for those algorithms in which the number of
       # signals is small.
       num_samples *= specs.CLRS_30_ALGS_SETTINGS[algorithm_name][
           'num_samples_multiplier']
+    return num_samples
+
+  def _create_data(self, single_sample):
+    algorithm_name = '_'.join(self._builder_config.name.split('_')[:-1])
+    num_samples = self._num_samples(algorithm_name)
     sampler, _ = samplers.build_sampler(
         algorithm_name,
         seed=samplers.CLRS30[self._builder_config.split]['seed'],
@@ -118,7 +122,8 @@ class CLRSDataset(tfds.core.GeneratorBasedBuilder):
 
   def _generate_examples(self):
     """Generator of examples for each split."""
-    for i in range(samplers.CLRS30[self._builder_config.split]['num_samples']):
+    algorithm_name = '_'.join(self._builder_config.name.split('_')[:-1])
+    for i in range(self._num_samples(algorithm_name)):
       data = {k: _correct_axis_filtering(v, i, k)
               for k, v in self._instantiated_dataset.items()}
       yield str(i), data
