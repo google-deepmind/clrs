@@ -347,6 +347,8 @@ class Net(hk.Module):
         # Optionally build diff decoders.
         diff_decoders.append(
             decoders.construct_diff_decoders(name=f'algo_{algo_idx}'))
+      else:
+        diff_decoders.append({})
 
     return encoders_, decoders_, diff_decoders
 
