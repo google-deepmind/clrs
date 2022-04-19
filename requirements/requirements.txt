@@ -8,5 +8,5 @@ numpy>=1.21.1
 opt-einsum>=3.3.0
 optax>=0.0.9
 six>=1.16.0
-tensorflow-datasets>=4.5.2
+tfds-nightly==4.5.2.dev202204190046
 toolz>=0.11.1
