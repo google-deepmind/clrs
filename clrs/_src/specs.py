@@ -471,8 +471,11 @@ SPECS = types.MappingProxyType({
         'match': (Stage.OUTPUT, Location.NODE, Type.MASK_ONE),
         'pred_h': (Stage.HINT, Location.NODE, Type.POINTER),
         'pi': (Stage.HINT, Location.NODE, Type.POINTER),
+        'is_reset': (Stage.HINT, Location.NODE, Type.MASK),
         'k': (Stage.HINT, Location.NODE, Type.MASK_ONE),
+        'k_reset': (Stage.HINT, Location.GRAPH, Type.MASK),
         'q': (Stage.HINT, Location.NODE, Type.MASK_ONE),
+        'q_reset': (Stage.HINT, Location.GRAPH, Type.MASK),
         's': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'i': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'phase': (Stage.HINT, Location.GRAPH, Type.MASK)

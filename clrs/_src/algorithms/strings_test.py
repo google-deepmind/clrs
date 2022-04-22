@@ -39,7 +39,11 @@ class StringsTest(parameterized.TestCase):
     self.assertEqual(offset, 2)
     offset, _ = algorithm(np.array([3, 2, 1]), np.array([1, 2, 3]))
     self.assertEqual(offset, 3)
-
+    offset, _ = algorithm(np.array(
+        [
+            3, 2, 2, 1, 2, 1, 2, 3, 0, 0, 2, 3, 0, 0, 1, 0
+        ]), np.array([2, 1, 2, 3]))
+    self.assertEqual(offset, 4)
 
 if __name__ == "__main__":
   absltest.main()

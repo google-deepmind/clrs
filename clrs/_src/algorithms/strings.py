@@ -134,7 +134,11 @@ def kmp_matcher(T: _Array, P: _Array) -> _Out:
       })
 
   pi = np.arange(P.shape[0])
+  is_reset = np.zeros(P.shape[0])
+
   k = 0
+  k_reset = 1
+  is_reset[0] = 1
 
   # Cover the edge case where |P| = 1, and the first half is not executed.
   delta = 1 if P.shape[0] > 1 else 0
@@ -145,30 +149,49 @@ def kmp_matcher(T: _Array, P: _Array) -> _Out:
       next_probe={
           'pred_h': probing.strings_pred(T_pos, P_pos),
           'pi': probing.strings_pi(T_pos, P_pos, pi),
+          'is_reset': np.concatenate(
+              [np.zeros(T.shape[0]), np.copy(is_reset)]),
           'k': probing.mask_one(T.shape[0], T.shape[0] + P.shape[0]),
+          'k_reset': k_reset,
           'q': probing.mask_one(T.shape[0] + delta, T.shape[0] + P.shape[0]),
+          'q_reset': 1,
           's': probing.mask_one(0, T.shape[0] + P.shape[0]),
           'i': probing.mask_one(0, T.shape[0] + P.shape[0]),
           'phase': 0
       })
 
   for q in range(1, P.shape[0]):
-    while k != pi[k] and P[k] != P[q]:
-      k = pi[k]
+    while k_reset == 0 and P[k + 1] != P[q]:
+      if is_reset[k] == 1:
+        k_reset = 1
+        k = 0
+      else:
+        k = pi[k]
       probing.push(
           probes,
           specs.Stage.HINT,
           next_probe={
               'pred_h': probing.strings_pred(T_pos, P_pos),
               'pi': probing.strings_pi(T_pos, P_pos, pi),
+              'is_reset': np.concatenate(
+                  [np.zeros(T.shape[0]), np.copy(is_reset)]),
               'k': probing.mask_one(T.shape[0] + k, T.shape[0] + P.shape[0]),
+              'k_reset': k_reset,
               'q': probing.mask_one(T.shape[0] + q, T.shape[0] + P.shape[0]),
+              'q_reset': 1,
               's': probing.mask_one(0, T.shape[0] + P.shape[0]),
               'i': probing.mask_one(0, T.shape[0] + P.shape[0]),
               'phase': 0
           })
-    if P[k] == P[q]:
+    if k_reset == 1:
+      k_reset = 0
+      k = -1
+    if P[k + 1] == P[q]:
       k += 1
+    if k == -1:
+      k = 0
+      k_reset = 1
+      is_reset[q] = 1
     pi[q] = k
     probing.push(
         probes,
@@ -176,13 +199,18 @@ def kmp_matcher(T: _Array, P: _Array) -> _Out:
         next_probe={
             'pred_h': probing.strings_pred(T_pos, P_pos),
             'pi': probing.strings_pi(T_pos, P_pos, pi),
+            'is_reset': np.concatenate(
+                [np.zeros(T.shape[0]), np.copy(is_reset)]),
             'k': probing.mask_one(T.shape[0] + k, T.shape[0] + P.shape[0]),
+            'k_reset': k_reset,
             'q': probing.mask_one(T.shape[0] + q, T.shape[0] + P.shape[0]),
+            'q_reset': 1,
             's': probing.mask_one(0, T.shape[0] + P.shape[0]),
             'i': probing.mask_one(0, T.shape[0] + P.shape[0]),
             'phase': 0
         })
   q = 0
+  q_reset = 1
   s = 0
   for i in range(T.shape[0]):
     if i >= P.shape[0]:
@@ -193,28 +221,43 @@ def kmp_matcher(T: _Array, P: _Array) -> _Out:
         next_probe={
             'pred_h': probing.strings_pred(T_pos, P_pos),
             'pi': probing.strings_pi(T_pos, P_pos, pi),
+            'is_reset': np.concatenate(
+                [np.zeros(T.shape[0]), np.copy(is_reset)]),
             'k': probing.mask_one(T.shape[0] + k, T.shape[0] + P.shape[0]),
+            'k_reset': k_reset,
             'q': probing.mask_one(T.shape[0] + q, T.shape[0] + P.shape[0]),
+            'q_reset': q_reset,
             's': probing.mask_one(s, T.shape[0] + P.shape[0]),
             'i': probing.mask_one(i, T.shape[0] + P.shape[0]),
             'phase': 1
         })
-    while q != pi[q] and P[q] != T[i]:
-      q = pi[q]
+    while q_reset == 0 and P[q + 1] != T[i]:
+      if is_reset[q] == 1:
+        q = 0
+        q_reset = 1
+      else:
+        q = pi[q]
       probing.push(
           probes,
           specs.Stage.HINT,
           next_probe={
               'pred_h': probing.strings_pred(T_pos, P_pos),
               'pi': probing.strings_pi(T_pos, P_pos, pi),
+              'is_reset': np.concatenate(
+                  [np.zeros(T.shape[0]), np.copy(is_reset)]),
               'k': probing.mask_one(T.shape[0] + k, T.shape[0] + P.shape[0]),
+              'k_reset': k_reset,
               'q': probing.mask_one(T.shape[0] + q, T.shape[0] + P.shape[0]),
+              'q_reset': q_reset,
               's': probing.mask_one(s, T.shape[0] + P.shape[0]),
               'i': probing.mask_one(i, T.shape[0] + P.shape[0]),
               'phase': 1
           })
-    if P[q] == T[i]:
-      if q == P.shape[0] - 1:
+    if q_reset == 1:
+      q = -1
+      q_reset = 0
+    if P[q + 1] == T[i]:
+      if q == P.shape[0] - 2:
         probing.push(
             probes,
             specs.Stage.OUTPUT,
@@ -222,6 +265,9 @@ def kmp_matcher(T: _Array, P: _Array) -> _Out:
         probing.finalize(probes)
         return s, probes
       q += 1
+    if q == -1:
+      q_reset = 1
+      q = 0
 
   # By convention, set probe to head of needle if no match is found
   probing.push(
