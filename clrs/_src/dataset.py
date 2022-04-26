@@ -160,9 +160,11 @@ def _preprocess(data_point, algorithm=None):
 def create_dataset(folder, algorithm, split, batch_size):
   dataset = tfds.load(f'clrs_dataset/{algorithm}_{split}',
                       data_dir=folder, split=split)
+  num_samples = len(dataset)  # Must be done here for correct size
   dataset = dataset.repeat()
   dataset = dataset.batch(batch_size)
   return (dataset.map(lambda d: _preprocess(d, algorithm=algorithm)),
+          num_samples,
           specs.SPECS[algorithm])
 
 

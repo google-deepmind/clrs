@@ -112,6 +112,31 @@ def evaluate(rng_key, model, feedback, extras=None, verbose=False):
   return {k: unpack(v) for k, v in out.items()}
 
 
+def evaluate_predictions(predictions, feedback, extras=None):
+  """Evaluates predictions against feedback."""
+  out = {}
+  out.update(clrs.evaluate(feedback, predictions))
+  if extras:
+    out.update(extras)
+  return {k: unpack(v) for k, v in out.items()}
+
+
+def collect_predictions(preds, targets, cur_preds, cur_targets):
+  """Collect current predictions and targets into the cumulative set."""
+  if targets:
+    for k in preds:
+      preds[k].data = jnp.concatenate(
+          [preds[k].data, cur_preds[k].data], axis=0)
+    for (i, item) in enumerate(cur_targets.outputs):
+      assert targets.outputs[i].name == item.name
+      targets.outputs[i].data = jnp.concatenate(
+          [targets.outputs[i].data, item.data], axis=0)
+  else:
+    preds = cur_preds
+    targets = cur_targets
+  return (preds, targets)
+
+
 def download_dataset():
   """Downloads CLRS30 dataset."""
   request = requests.get(DATASET_GCP_URL, allow_redirects=True)
@@ -159,17 +184,19 @@ def main(unused_argv):
     if FLAGS.chunked_training:
       train_sampler, spec = clrs.create_chunked_dataset(
           **common_args, split='train', chunk_length=FLAGS.chunk_length)
-      train_sampler_for_eval, _ = clrs.create_dataset(
+      train_sampler_for_eval, _, _ = clrs.create_dataset(
           split='train', **common_args)
       train_sampler_for_eval = train_sampler_for_eval.as_numpy_iterator()
     else:
-      train_sampler, spec = clrs.create_dataset(**common_args, split='train')
+      train_sampler, _, spec = clrs.create_dataset(**common_args, split='train')
       train_sampler = train_sampler.as_numpy_iterator()
       train_sampler_for_eval = None
 
-    val_sampler, _ = clrs.create_dataset(**common_args, split='val')
+    val_sampler, val_samples, _ = clrs.create_dataset(
+        **common_args, split='val')
     val_sampler = val_sampler.as_numpy_iterator()
-    test_sampler, _ = clrs.create_dataset(**common_args, split='test')
+    test_sampler, test_samples, _ = clrs.create_dataset(
+        **common_args, split='test')
     test_sampler = test_sampler.as_numpy_iterator()
 
   model_params = dict(
@@ -249,13 +276,22 @@ def main(unused_argv):
       logging.info('(train) step %d: %s', step, train_stats)
 
       # Validation info.
-      val_feedback = next(val_sampler)
-      rng_key, new_rng_key = jax.random.split(rng_key)
-      val_stats = evaluate(
-          rng_key, eval_model, val_feedback,
-          extras=common_extras,
-          verbose=FLAGS.verbose_logging)
-      rng_key = new_rng_key
+      val_processed_samples = 0
+      val_preds = {}
+      val_targets = None
+      while val_processed_samples < val_samples:
+        cur_val_feedback = next(val_sampler)
+        rng_key, new_rng_key = jax.random.split(rng_key)
+        cur_val_preds, _ = eval_model.predict(
+            rng_key, cur_val_feedback.features)
+        val_preds, val_targets = collect_predictions(
+            val_preds, val_targets, cur_val_preds, cur_val_feedback)
+        rng_key = new_rng_key
+        val_processed_samples += FLAGS.batch_size
+
+      val_stats = evaluate_predictions(
+          val_preds, val_targets,
+          extras=common_extras)
       logging.info('(val) step %d: %s', step, val_stats)
 
       # If best scores, update checkpoint.
@@ -272,13 +308,21 @@ def main(unused_argv):
   logging.info('Restoring best model from checkpoint...')
   eval_model.restore_model('best.pkl', only_load_processor=False)
 
-  test_feedback = next(test_sampler)  # full-batch
-  rng_key, new_rng_key = jax.random.split(rng_key)
-  test_stats = evaluate(
-      rng_key, eval_model, test_feedback,
-      extras=dict(examples_seen=current_train_items, step=step),
-      verbose=FLAGS.verbose_logging)
-  rng_key = new_rng_key
+  test_processed_samples = 0
+  test_preds = {}
+  test_targets = None
+  while test_processed_samples < test_samples:
+    cur_test_feedback = next(test_sampler)
+    rng_key, new_rng_key = jax.random.split(rng_key)
+    cur_test_preds, _ = eval_model.predict(rng_key, cur_test_feedback.features)
+    test_preds, test_targets = collect_predictions(
+        test_preds, test_targets, cur_test_preds, cur_test_feedback)
+    rng_key = new_rng_key
+    test_processed_samples += FLAGS.batch_size
+
+  test_stats = evaluate_predictions(
+      test_preds, test_targets,
+      extras=dict(examples_seen=current_train_items, step=step))
   logging.info('(test) step %d: %s', step, test_stats)
 
 
