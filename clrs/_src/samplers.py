@@ -252,6 +252,7 @@ class SearchSampler(Sampler):
       high: float = 1.,
   ):
     arr = self._random_sequence(length=length, low=low, high=high)
+    arr.sort()
     x = self._rng.uniform(low=low, high=high)
     return [x, arr]
 
