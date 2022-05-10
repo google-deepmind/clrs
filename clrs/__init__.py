@@ -22,6 +22,7 @@ from clrs._src.dataset import CLRSDataset
 from clrs._src.dataset import create_chunked_dataset
 from clrs._src.dataset import create_dataset
 from clrs._src.model import evaluate
+from clrs._src.model import evaluate_hints
 from clrs._src.model import Model
 from clrs._src.probing import DataPoint
 from clrs._src.samplers import build_sampler
@@ -46,6 +47,7 @@ __all__ = (
     "create_dataset",
     "DataPoint",
     "evaluate",
+    "evaluate_hints",
     "Features",
     "Feedback",
     "Location",

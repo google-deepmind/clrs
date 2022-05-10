@@ -17,6 +17,7 @@
 
 import abc
 from typing import Dict, List, Optional, Union
+import chex
 
 from clrs._src import probing
 from clrs._src import samplers
@@ -24,6 +25,7 @@ from clrs._src import specs
 import numpy as np
 
 
+_Array = chex.Array
 Result = Dict[str, probing.DataPoint]
 
 
@@ -47,31 +49,65 @@ class Model(abc.ABC):
     pass
 
 
+def evaluate_hints(
+    feedback: samplers.Feedback,
+    hint_preds: List[Result],
+) -> Dict[str, _Array]:
+  """Evaluate hint predictions."""
+  evals = {}
+  lengths = feedback.features.lengths
+  for truth in feedback.features.hints:
+    assert truth.name in hint_preds[0]
+    eval_along_time = [_evaluate(truth, p[truth.name], feedback.features.hints,
+                                 idx=i+1, lengths=lengths)
+                       for (i, p) in enumerate(hint_preds)]
+    evals[truth.name] = np.sum(
+        [x * np.sum(i+1 < lengths)
+         for i, x in enumerate(eval_along_time)]) / np.sum(lengths - 1)
+    evals[truth.name + '_along_time'] = np.array(eval_along_time)
+
+  # Unlike outputs, the hints sometimes include scalars, which don't have
+  # a meaningful eval score. So we don't compute a global 'hint score' as we
+  # do for outputs.
+  return evals
+
+
 def evaluate(
     feedback: samplers.Feedback,
     predictions: Result,
 ) -> Dict[str, float]:
-  """Evaluate predictions."""
+  """Evaluate output predictions."""
   evals = {}
   for truth in feedback.outputs:
     assert truth.name in predictions
     pred = predictions[truth.name]
-    assert pred.name == truth.name
-    assert pred.location == truth.location
-    assert pred.type_ == truth.type_
-    mask_name = f'{truth.name}_mask'
-    if mask_name in feedback.outputs:
-      mask = feedback.outputs[mask_name].data
-      evals[truth.name] = np.mean(
-          (pred.data[mask].flatten() - truth.data[mask].flatten())**2)
-    else:
-      if truth.type_ not in _EVAL_FN:
-        raise ValueError('Invalid type')
-      evals[truth.name] = _EVAL_FN[truth.type_](pred.data, truth.data)
-
+    evals[truth.name] = _evaluate(truth, pred, feedback.outputs)
   # Return a single scalar score that is the mean of all output scores.
   evals['score'] = sum([v.item() for v in evals.values()]) / len(evals)
   return evals
+
+
+def _evaluate(truth, pred, full_truth, idx=None, lengths=None):
+  """Evaluate single prediction of hint or output."""
+  assert pred.name == truth.name
+  assert pred.location == truth.location
+  assert pred.type_ == truth.type_
+  mask_name = f'{truth.name}_mask'
+  if mask_name in full_truth:
+    assert False
+    mask = full_truth[mask_name].data
+    return np.mean((pred.data[mask].flatten() - truth.data[mask].flatten())**2)
+  else:
+    if truth.type_ not in _EVAL_FN:
+      raise ValueError('Invalid type')
+    truth_data = truth.data
+    pred_data = pred.data
+    if idx is not None:
+      if np.all(idx >= lengths):
+        return 0.
+      truth_data = truth_data[idx][idx < lengths]
+      pred_data = pred_data[idx < lengths]
+    return _EVAL_FN[truth.type_](pred_data, truth_data)
 
 
 def _eval_one(pred, truth):
