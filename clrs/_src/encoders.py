@@ -54,7 +54,7 @@ def accum_adj_mat(dp: _DataPoint, data: _Array, adj_mat: _Array) -> _Array:
   if dp.location == _Location.NODE and dp.type_ == _Type.POINTER:
     adj_mat += ((data + jnp.transpose(data, (0, 2, 1))) > 0.0)
   elif dp.location == _Location.EDGE and dp.type_ == _Type.MASK:
-    adj_mat += (data > 0.0)
+    adj_mat += ((data + jnp.transpose(data, (0, 2, 1))) > 0.0)
 
   return (adj_mat > 0.).astype('float32')
 
