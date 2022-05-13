@@ -69,6 +69,7 @@ class BaselineModel(model.Model):
       checkpoint_path: str = '/tmp/clrs3',
       freeze_processor: bool = False,
       dropout_prob: float = 0.0,
+      hint_teacher_forcing_noise: float = 0.0,
       name: str = 'base_model',
   ):
     """Constructor for BaselineModel.
@@ -97,6 +98,9 @@ class BaselineModel(model.Model):
       freeze_processor: If True, the processor weights will be frozen and
         only encoders and decoders (and, if used, the lstm) will be trained.
       dropout_prob: Dropout rate in the message-passing stage.
+      hint_teacher_forcing_noise: Probability of using predicted hints instead
+        of ground-truth hints as inputs during training (only relevant if
+        `encode_hints`=True
       name: Model name.
 
     Raises:
@@ -128,18 +132,18 @@ class BaselineModel(model.Model):
         nb_dims[outp.name] = outp.data.shape[-1]
       self.nb_dims.append(nb_dims)
 
-    self._create_net_fns(hidden_dim, encode_hints, kind,
-                         use_lstm, dropout_prob, nb_heads)
+    self._create_net_fns(hidden_dim, encode_hints, kind, use_lstm,
+                         dropout_prob, hint_teacher_forcing_noise, nb_heads)
     self.params = None
     self.opt_state = None
     self.opt_state_skeleton = None
 
-  def _create_net_fns(self, hidden_dim, encode_hints, kind,
-                      use_lstm, dropout_prob, nb_heads):
+  def _create_net_fns(self, hidden_dim, encode_hints, kind, use_lstm,
+                      dropout_prob, hint_teacher_forcing_noise, nb_heads):
     def _use_net(*args, **kwargs):
       return nets.Net(self._spec, hidden_dim, encode_hints,
                       self.decode_hints, self.decode_diffs,
-                      kind, use_lstm, dropout_prob,
+                      kind, use_lstm, dropout_prob, hint_teacher_forcing_noise,
                       nb_heads, self.nb_dims)(*args, **kwargs)
 
     self.net_fn = hk.transform(_use_net)
@@ -279,7 +283,7 @@ class BaselineModel(model.Model):
         losses_.update(
             losses.hint_loss(
                 truth=truth,
-                preds=hint_preds,
+                preds=[x[truth.name] for x in hint_preds],
                 gt_diffs=gt_diffs,
                 lengths=lengths,
                 nb_nodes=nb_nodes,
@@ -323,13 +327,13 @@ class BaselineModelChunked(BaselineModel):
     `BaselineModel`.
   """
 
-  def _create_net_fns(self, hidden_dim, encode_hints, kind,
-                      use_lstm, dropout_prob, nb_heads):
+  def _create_net_fns(self, hidden_dim, encode_hints, kind, use_lstm,
+                      dropout_prob, hint_teacher_forcing_noise, nb_heads):
     def _use_net(*args, **kwargs):
       return nets.NetChunked(
           self._spec, hidden_dim, encode_hints,
           self.decode_hints, self.decode_diffs,
-          kind, use_lstm, dropout_prob,
+          kind, use_lstm, dropout_prob, hint_teacher_forcing_noise,
           nb_heads, self.nb_dims)(*args, **kwargs)
 
     self.net_fn = hk.transform(_use_net)

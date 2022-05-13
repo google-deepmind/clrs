@@ -85,6 +85,7 @@ class Net(hk.Module):
       kind: str,
       use_lstm: bool,
       dropout_prob: float,
+      hint_teacher_forcing_noise: float,
       nb_heads: int,
       nb_dims=None,
       name: str = 'net',
@@ -93,6 +94,7 @@ class Net(hk.Module):
     super().__init__(name=name)
 
     self._dropout_prob = dropout_prob
+    self._hint_teacher_forcing_noise = hint_teacher_forcing_noise
     self.spec = spec
     self.hidden_dim = hidden_dim
     self.encode_hints = encode_hints
@@ -118,20 +120,34 @@ class Net(hk.Module):
                         decs: Dict[str, Tuple[hk.Module]],
                         diff_decs: Dict[str, Any],
                         ):
-    if (not first_step) and repred and self.decode_hints:
+    if self.decode_hints and not first_step:
       decoded_hint = decoders.postprocess(spec,
                                           mp_state.hint_preds)
+    if repred and self.decode_hints and not first_step:
       cur_hint = []
       for hint in decoded_hint:
         cur_hint.append(decoded_hint[hint])
     else:
       cur_hint = []
+      needs_noise = (self.decode_hints and not first_step and
+                     self._hint_teacher_forcing_noise > 0)
+      if needs_noise:
+        # For noisy teacher forcing, choose which examples in the batch to force
+        force_mask = jax.random.bernoulli(
+            hk.next_rng_key(), 1.0 - self._hint_teacher_forcing_noise,
+            (batch_size,))
+      else:
+        force_mask = None
       for hint in hints:
-        hint.data = jnp.asarray(hint.data)
+        hint_data = jnp.asarray(hint.data)[i]
+        if needs_noise:
+          hint_data = jnp.where(_expand_to(force_mask, hint_data),
+                                hint_data,
+                                decoded_hint[hint.name].data)
         _, loc, typ = spec[hint.name]
         cur_hint.append(
             probing.DataPoint(
-                name=hint.name, location=loc, type_=typ, data=hint.data[i]))
+                name=hint.name, location=loc, type_=typ, data=hint_data))
 
     gt_diffs = None
     if hints[0].data.shape[0] > 1 and self.decode_diffs:
@@ -501,13 +517,21 @@ class NetChunked(Net):
       hints_for_pred = hints
     else:
       prev_hint_preds = mp_state.hint_preds
-      if repred and self.decode_hints:
+      if self.decode_hints:
+        if repred:
+          force_mask = jnp.zeros(batch_size, dtype=bool)
+        elif self._hint_teacher_forcing_noise == 0.:
+          force_mask = jnp.ones(batch_size, dtype=bool)
+        else:
+          force_mask = jax.random.bernoulli(
+              hk.next_rng_key(), 1.0 - self._hint_teacher_forcing_noise,
+              (batch_size,))
         decoded_hints = decoders.postprocess(spec, prev_hint_preds)
         hints_for_pred = []
         for h in hints:
           hints_for_pred.append(probing.DataPoint(
               name=h.name, location=h.location, type_=h.type_,
-              data=jnp.where(_expand_to(is_first, h.data),
+              data=jnp.where(_expand_to(is_first | force_mask, h.data),
                              h.data, decoded_hints[h.name].data)))
       else:
         hints_for_pred = hints
