@@ -29,8 +29,6 @@ _Spec = specs.Spec
 _Stage = specs.Stage
 _Type = specs.Type
 
-_BIG_NUMBER = 1e5
-
 
 def construct_decoders(loc: str, t: str, hidden_dim: int, nb_dims: int,
                        name: str):
@@ -164,7 +162,10 @@ def _decode_node_fts(decoders, t: str, h_t: _Array, adj_mat: _Array,
     ptr_p = jnp.matmul(p_1, jnp.transpose(p_2, (0, 2, 1)))
     preds = ptr_p
     if inf_bias:
-      preds -= (1 - adj_mat) * _BIG_NUMBER
+      per_batch_min = jnp.min(preds, axis=range(1, preds.ndim), keepdims=True)
+      preds = jnp.where(adj_mat > 0.5,
+                        preds,
+                        jnp.minimum(-1.0, per_batch_min - 1.0))
   else:
     raise ValueError("Invalid output type")
 
@@ -190,7 +191,10 @@ def _decode_edge_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
   else:
     raise ValueError("Invalid output type")
   if inf_bias_edge and t in [_Type.MASK, _Type.MASK_ONE]:
-    preds -= (1 - adj_mat) * _BIG_NUMBER
+    per_batch_min = jnp.min(preds, axis=range(1, preds.ndim), keepdims=True)
+    preds = jnp.where(adj_mat > 0.5,
+                      preds,
+                      jnp.minimum(-1.0, per_batch_min - 1.0))
 
   return preds
 
