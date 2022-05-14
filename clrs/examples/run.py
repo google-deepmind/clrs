@@ -53,10 +53,16 @@ flags.DEFINE_integer('hidden_size', 128,
                      'Number of hidden size units of the model.')
 flags.DEFINE_float('learning_rate', 0.003, 'Learning rate to use.')
 flags.DEFINE_float('dropout_prob', 0.0, 'Dropout rate to use.')
+flags.DEFINE_float('hint_teacher_forcing_noise', 0.0,
+                   'Probability that rematerialized hints are encoded during '
+                   'training instead of ground-truth teacher hints. Only '
+                   'pertinent in encoded_decoded modes.')
 flags.DEFINE_integer('nb_heads', 1, 'Number of heads for GAT processors')
 
 flags.DEFINE_enum('hint_mode', 'encoded_decoded',
-                  ['encoded_decoded', 'decoded_only', 'none'],
+                  ['encoded_decoded', 'decoded_only',
+                   'encoded_decoded_nodiff', 'decoded_only_nodiff',
+                   'none'],
                   'How should hints be used? Note, each mode defines a '
                   'separate task, with various difficulties. `encoded_decoded` '
                   'requires the model to explicitly materialise hint sequences '
@@ -68,7 +74,9 @@ flags.DEFINE_enum('hint_mode', 'encoded_decoded',
                   'note that we currently do not make any efforts to '
                   'counterbalance the various hint losses. Hence, for certain '
                   'tasks, the best performance will now be achievable with no '
-                  'hint usage at all (`none`).')
+                  'hint usage at all (`none`). The `no_diff` variants '
+                  'try to predict all hint values instead of just the values '
+                  'that change from one timestep to the next.')
 
 flags.DEFINE_boolean('use_lstm', False,
                      'Whether to insert an LSTM after message passing.')
@@ -161,7 +169,15 @@ def main(unused_argv):
     logging.info('Dataset not found in %s. Downloading...', clrs_dataset_path)
     download_dataset()
 
-  if FLAGS.hint_mode == 'encoded_decoded':
+  if FLAGS.hint_mode == 'encoded_decoded_nodiff':
+    encode_hints = True
+    decode_hints = True
+    decode_diffs = False
+  elif FLAGS.hint_mode == 'decoded_only_nodiff':
+    encode_hints = False
+    decode_hints = True
+    decode_diffs = False
+  elif FLAGS.hint_mode == 'encoded_decoded':
     encode_hints = True
     decode_hints = True
     decode_diffs = True
@@ -210,6 +226,7 @@ def main(unused_argv):
       checkpoint_path=FLAGS.checkpoint_path,
       freeze_processor=FLAGS.freeze_processor,
       dropout_prob=FLAGS.dropout_prob,
+      hint_teacher_forcing_noise=FLAGS.hint_teacher_forcing_noise,
       nb_heads=FLAGS.nb_heads,
       )
 
