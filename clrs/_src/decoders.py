@@ -41,7 +41,8 @@ def construct_decoders(loc: str, t: str, hidden_dim: int, nb_dims: int,
     elif t == _Type.CATEGORICAL:
       decoders = (linear(nb_dims),)
     elif t == _Type.POINTER:
-      decoders = (linear(hidden_dim), linear(hidden_dim))
+      decoders = (linear(hidden_dim), linear(hidden_dim), linear(hidden_dim),
+                  linear(1))
     else:
       raise ValueError(f"Invalid Type {t}")
 
@@ -53,7 +54,7 @@ def construct_decoders(loc: str, t: str, hidden_dim: int, nb_dims: int,
       decoders = (linear(nb_dims), linear(nb_dims), linear(nb_dims))
     elif t == _Type.POINTER:
       decoders = (linear(hidden_dim), linear(hidden_dim),
-                  linear(hidden_dim), linear(hidden_dim))
+                  linear(hidden_dim), linear(hidden_dim), linear(1))
     else:
       raise ValueError(f"Invalid Type {t}")
 
@@ -64,8 +65,8 @@ def construct_decoders(loc: str, t: str, hidden_dim: int, nb_dims: int,
     elif t == _Type.CATEGORICAL:
       decoders = (linear(nb_dims), linear(nb_dims))
     elif t == _Type.POINTER:
-      decoders = (linear(hidden_dim), linear(hidden_dim),
-                  linear(hidden_dim))
+      decoders = (linear(1), linear(1),
+                  linear(1))
     else:
       raise ValueError(f"Invalid Type {t}")
 
@@ -129,7 +130,8 @@ def decode_fts(
     stage, loc, t = spec[name]
 
     if loc == _Location.NODE:
-      preds = _decode_node_fts(decoder, t, h_t, adj_mat, inf_bias)
+      preds = _decode_node_fts(decoder, t, h_t, edge_fts, adj_mat,
+                               inf_bias)
     elif loc == _Location.EDGE:
       preds = _decode_edge_fts(decoder, t, h_t, edge_fts, adj_mat,
                                inf_bias_edge)
@@ -148,8 +150,8 @@ def decode_fts(
   return hint_preds, output_preds
 
 
-def _decode_node_fts(decoders, t: str, h_t: _Array, adj_mat: _Array,
-                     inf_bias: bool) -> _Array:
+def _decode_node_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
+                     adj_mat: _Array, inf_bias: bool) -> _Array:
   """Decodes node features."""
 
   if t in [_Type.SCALAR, _Type.MASK, _Type.MASK_ONE]:
@@ -159,8 +161,14 @@ def _decode_node_fts(decoders, t: str, h_t: _Array, adj_mat: _Array,
   elif t == _Type.POINTER:
     p_1 = decoders[0](h_t)
     p_2 = decoders[1](h_t)
-    ptr_p = jnp.matmul(p_1, jnp.transpose(p_2, (0, 2, 1)))
-    preds = ptr_p
+    p_3 = decoders[2](edge_fts)
+
+    p_e = jnp.expand_dims(p_2, -2) + p_3
+    p_m = jnp.maximum(jnp.expand_dims(p_1, -2),
+                      jnp.transpose(p_e, (0, 2, 1, 3)))
+
+    preds = jnp.squeeze(decoders[3](p_m), -1)
+
     if inf_bias:
       per_batch_min = jnp.min(preds, axis=range(1, preds.ndim), keepdims=True)
       preds = jnp.where(adj_mat > 0.5,
@@ -185,9 +193,13 @@ def _decode_edge_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
   elif t == _Type.CATEGORICAL:
     preds = pred
   elif t == _Type.POINTER:
-    pred_2 = jnp.expand_dims(decoders[3](h_t), -1)
-    ptr_p = jnp.matmul(pred, jnp.transpose(pred_2, (0, 3, 2, 1)))
-    preds = ptr_p
+    pred_2 = decoders[3](h_t)
+
+    p_m = jnp.maximum(jnp.expand_dims(pred, -2),
+                      jnp.expand_dims(
+                          jnp.expand_dims(pred_2, -3), -3))
+
+    preds = jnp.squeeze(decoders[4](p_m), -1)
   else:
     raise ValueError("Invalid output type")
   if inf_bias_edge and t in [_Type.MASK, _Type.MASK_ONE]:
@@ -213,8 +225,7 @@ def _decode_graph_fts(decoders, t: str, h_t: _Array,
     preds = pred
   elif t == _Type.POINTER:
     pred_2 = decoders[2](h_t)
-    ptr_p = jnp.matmul(
-        jnp.expand_dims(pred, 1), jnp.transpose(pred_2, (0, 2, 1)))
+    ptr_p = jnp.expand_dims(pred, 1) + jnp.transpose(pred_2, (0, 2, 1))
     preds = jnp.squeeze(ptr_p, 1)
 
   return preds

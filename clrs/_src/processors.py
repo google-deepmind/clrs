@@ -75,6 +75,7 @@ class GAT(Processor):
       nb_heads: int,
       activation: Optional[_Fn] = jax.nn.relu,
       residual: bool = True,
+      use_ln: bool = False,
       name: str = 'gat_aggr',
   ):
     super().__init__(name=name)
@@ -85,6 +86,7 @@ class GAT(Processor):
     self.head_size = out_size // nb_heads
     self.activation = activation
     self.residual = residual
+    self.use_ln = use_ln
 
   def __call__(
       self,
@@ -144,6 +146,10 @@ class GAT(Processor):
     if self.activation is not None:
       ret = self.activation(ret)
 
+    if self.use_ln:
+      ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
+      ret = ln(ret)
+
     return ret
 
 
@@ -166,6 +172,7 @@ class GATv2(Processor):
       mid_size: Optional[int] = None,
       activation: Optional[_Fn] = jax.nn.relu,
       residual: bool = True,
+      use_ln: bool = False,
       name: str = 'gatv2_aggr',
   ):
     super().__init__(name=name)
@@ -183,6 +190,7 @@ class GATv2(Processor):
     self.mid_head_size = self.mid_size // nb_heads
     self.activation = activation
     self.residual = residual
+    self.use_ln = use_ln
 
   def __call__(
       self,
@@ -266,6 +274,10 @@ class GATv2(Processor):
     if self.activation is not None:
       ret = self.activation(ret)
 
+    if self.use_ln:
+      ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
+      ret = ln(ret)
+
     return ret
 
 
@@ -289,6 +301,7 @@ class PGN(Processor):
       activation: Optional[_Fn] = jax.nn.relu,
       reduction: _Fn = jnp.max,
       msgs_mlp_sizes: Optional[List[int]] = None,
+      use_ln: bool = False,
       name: str = 'mpnn_aggr',
   ):
     super().__init__(name=name)
@@ -301,6 +314,7 @@ class PGN(Processor):
     self.activation = activation
     self.reduction = reduction
     self._msgs_mlp_sizes = msgs_mlp_sizes
+    self.use_ln = use_ln
 
   def __call__(
       self,
@@ -355,6 +369,10 @@ class PGN(Processor):
     if self.activation is not None:
       ret = self.activation(ret)
 
+    if self.use_ln:
+      ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
+      ret = ln(ret)
+
     return ret
 
 
@@ -407,6 +425,7 @@ class MemNetMasked(Processor):
       nonlin: Callable[[Any], Any] = jax.nn.relu,
       apply_embeddings: bool = True,
       init_func: hk.initializers.Initializer = jnp.zeros,
+      use_ln: bool = False,
       name: str = 'memnet') -> None:
     """Constructor.
 
@@ -423,6 +442,7 @@ class MemNetMasked(Processor):
       nonlin: non-linear transformation applied at the end of each layer.
       apply_embeddings: flag whether to aply embeddings.
       init_func: initialization function for the biases.
+      use_ln: whether to use layer normalisation in the model.
       name: the name of the model.
     """
     super().__init__(name=name)
@@ -435,6 +455,7 @@ class MemNetMasked(Processor):
     self._nonlin = nonlin
     self._apply_embeddings = apply_embeddings
     self._init_func = init_func
+    self._use_ln = use_ln
     # Encoding part: i.e. "I" of the paper.
     self._encodings = _position_encoding(sentence_size, embedding_size)
 
@@ -565,7 +586,13 @@ class MemNetMasked(Processor):
         output_layer = self._nonlin(output_layer)
 
     # This linear here is "W".
-    return hk.Linear(self._vocab_size, with_bias=False)(output_layer)
+    ret = hk.Linear(self._vocab_size, with_bias=False)(output_layer)
+
+    if self._use_ln:
+      ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
+      ret = ln(ret)
+
+    return ret
 
 
 class MemNetFull(MemNetMasked):
@@ -577,19 +604,39 @@ class MemNetFull(MemNetMasked):
     return super().__call__(node_fts, edge_fts, graph_fts, adj_mat, hidden)
 
 
-def construct_processor(kind: str, hidden_dim: int, nb_heads: int) -> Processor:
+def construct_processor(kind: str, hidden_dim: int, nb_heads: int,
+                        use_ln: bool) -> Processor:
   """Constructs a processor."""
   if kind == 'deepsets':
     processor = DeepSets(
-        out_size=hidden_dim, msgs_mlp_sizes=[hidden_dim, hidden_dim])
+        out_size=hidden_dim,
+        msgs_mlp_sizes=[hidden_dim, hidden_dim],
+        use_ln=use_ln
+    )
   elif kind == 'gat':
-    processor = GAT(out_size=hidden_dim, nb_heads=nb_heads)
+    processor = GAT(
+        out_size=hidden_dim,
+        nb_heads=nb_heads,
+        use_ln=use_ln
+    )
   elif kind == 'gat_full':
-    processor = GATFull(out_size=hidden_dim, nb_heads=nb_heads)
+    processor = GATFull(
+        out_size=hidden_dim,
+        nb_heads=nb_heads,
+        use_ln=use_ln
+    )
   elif kind == 'gatv2':
-    processor = GATv2(out_size=hidden_dim, nb_heads=nb_heads)
+    processor = GATv2(
+        out_size=hidden_dim,
+        nb_heads=nb_heads,
+        use_ln=use_ln
+    )
   elif kind == 'gatv2_full':
-    processor = GATv2Full(out_size=hidden_dim, nb_heads=nb_heads)
+    processor = GATv2Full(
+        out_size=hidden_dim,
+        nb_heads=nb_heads,
+        use_ln=use_ln
+    )
   elif kind == 'memnet_full':
     processor = MemNetFull(
         vocab_size=hidden_dim,
@@ -604,13 +651,22 @@ def construct_processor(kind: str, hidden_dim: int, nb_heads: int) -> Processor:
     )
   elif kind == 'mpnn':
     processor = MPNN(
-        out_size=hidden_dim, msgs_mlp_sizes=[hidden_dim, hidden_dim])
+        out_size=hidden_dim,
+        msgs_mlp_sizes=[hidden_dim, hidden_dim],
+        use_ln=use_ln
+    )
   elif kind == 'pgn':
     processor = PGN(
-        out_size=hidden_dim, msgs_mlp_sizes=[hidden_dim, hidden_dim])
+        out_size=hidden_dim,
+        msgs_mlp_sizes=[hidden_dim, hidden_dim],
+        use_ln=use_ln
+    )
   elif kind == 'pgn_mask':
     processor = PGNMask(
-        out_size=hidden_dim, msgs_mlp_sizes=[hidden_dim, hidden_dim])
+        out_size=hidden_dim,
+        msgs_mlp_sizes=[hidden_dim, hidden_dim],
+        use_ln=use_ln
+    )
   else:
     raise ValueError('Unexpected processor kind ' + kind)
 

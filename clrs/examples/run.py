@@ -78,6 +78,8 @@ flags.DEFINE_enum('hint_mode', 'encoded_decoded',
                   'try to predict all hint values instead of just the values '
                   'that change from one timestep to the next.')
 
+flags.DEFINE_boolean('use_ln', True,
+                     'Whether to use layer normalisation in the processor.')
 flags.DEFINE_boolean('use_lstm', False,
                      'Whether to insert an LSTM after message passing.')
 flags.DEFINE_enum(
@@ -85,7 +87,7 @@ flags.DEFINE_enum(
     ['deepsets', 'mpnn', 'pgn', 'pgn_mask',
      'gat', 'gatv2', 'gat_full', 'gatv2_full',
      'memnet_full', 'memnet_masked'],
-    'Whether to predict masks within the model.')
+    'The processor type to use.')
 
 flags.DEFINE_string('checkpoint_path', '/tmp/CLRS30',
                     'Path in which checkpoints are saved.')
@@ -228,6 +230,7 @@ def main(unused_argv):
       dropout_prob=FLAGS.dropout_prob,
       hint_teacher_forcing_noise=FLAGS.hint_teacher_forcing_noise,
       nb_heads=FLAGS.nb_heads,
+      use_ln=FLAGS.use_ln,
       )
 
   eval_model = clrs.models.BaselineModel(

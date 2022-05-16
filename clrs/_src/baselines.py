@@ -70,6 +70,7 @@ class BaselineModel(model.Model):
       freeze_processor: bool = False,
       dropout_prob: float = 0.0,
       hint_teacher_forcing_noise: float = 0.0,
+      use_ln: bool = False,
       name: str = 'base_model',
   ):
     """Constructor for BaselineModel.
@@ -101,6 +102,7 @@ class BaselineModel(model.Model):
       hint_teacher_forcing_noise: Probability of using predicted hints instead
         of ground-truth hints as inputs during training (only relevant if
         `encode_hints`=True
+      use_ln: Whether or not to use layer normalisation in the processor.
       name: Model name.
 
     Raises:
@@ -133,18 +135,20 @@ class BaselineModel(model.Model):
       self.nb_dims.append(nb_dims)
 
     self._create_net_fns(hidden_dim, encode_hints, kind, use_lstm,
-                         dropout_prob, hint_teacher_forcing_noise, nb_heads)
+                         dropout_prob, hint_teacher_forcing_noise,
+                         nb_heads, use_ln)
     self.params = None
     self.opt_state = None
     self.opt_state_skeleton = None
 
   def _create_net_fns(self, hidden_dim, encode_hints, kind, use_lstm,
-                      dropout_prob, hint_teacher_forcing_noise, nb_heads):
+                      dropout_prob, hint_teacher_forcing_noise,
+                      nb_heads, use_ln):
     def _use_net(*args, **kwargs):
       return nets.Net(self._spec, hidden_dim, encode_hints,
                       self.decode_hints, self.decode_diffs,
                       kind, use_lstm, dropout_prob, hint_teacher_forcing_noise,
-                      nb_heads, self.nb_dims)(*args, **kwargs)
+                      nb_heads, use_ln, self.nb_dims)(*args, **kwargs)
 
     self.net_fn = hk.transform(_use_net)
     self.net_fn_apply = jax.jit(self.net_fn.apply,
@@ -328,13 +332,14 @@ class BaselineModelChunked(BaselineModel):
   """
 
   def _create_net_fns(self, hidden_dim, encode_hints, kind, use_lstm,
-                      dropout_prob, hint_teacher_forcing_noise, nb_heads):
+                      dropout_prob, hint_teacher_forcing_noise,
+                      nb_heads, use_ln):
     def _use_net(*args, **kwargs):
       return nets.NetChunked(
           self._spec, hidden_dim, encode_hints,
           self.decode_hints, self.decode_diffs,
           kind, use_lstm, dropout_prob, hint_teacher_forcing_noise,
-          nb_heads, self.nb_dims)(*args, **kwargs)
+          nb_heads, use_ln, self.nb_dims)(*args, **kwargs)
 
     self.net_fn = hk.transform(_use_net)
     self.net_fn_apply = jax.jit(

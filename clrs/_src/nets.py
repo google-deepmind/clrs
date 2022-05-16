@@ -87,6 +87,7 @@ class Net(hk.Module):
       dropout_prob: float,
       hint_teacher_forcing_noise: float,
       nb_heads: int,
+      use_ln: bool,
       nb_dims=None,
       name: str = 'net',
   ):
@@ -104,6 +105,7 @@ class Net(hk.Module):
     self.nb_dims = nb_dims
     self.use_lstm = use_lstm
     self.nb_heads = nb_heads
+    self.use_ln = use_ln
 
   def _msg_passing_step(self,
                         mp_state: _MessagePassingScanState,
@@ -246,7 +248,8 @@ class Net(hk.Module):
     (self.encoders, self.decoders,
      self.diff_decoders) = self._construct_encoders_decoders()
     self.processor = processors.construct_processor(
-        kind=self.kind, hidden_dim=self.hidden_dim, nb_heads=self.nb_heads)
+        kind=self.kind, hidden_dim=self.hidden_dim,
+        nb_heads=self.nb_heads, use_ln=self.use_ln)
 
     # Optionally construct LSTM.
     if self.use_lstm:
@@ -655,7 +658,8 @@ class NetChunked(Net):
     (self.encoders, self.decoders,
      self.diff_decoders) = self._construct_encoders_decoders()
     self.processor = processors.construct_processor(
-        kind=self.kind, hidden_dim=self.hidden_dim, nb_heads=self.nb_heads)
+        kind=self.kind, hidden_dim=self.hidden_dim,
+        nb_heads=self.nb_heads, use_ln=self.use_ln)
     # Optionally construct LSTM.
     if self.use_lstm:
       self.lstm = hk.LSTM(

@@ -33,6 +33,7 @@ class MemnetTest(absltest.TestCase):
     memory_size = 320
     linear_output_size = 128
     num_hops = 2
+    use_ln = True
 
     def forward_fn(queries, stories):
       model = processors.MemNetFull(
@@ -41,7 +42,8 @@ class MemnetTest(absltest.TestCase):
           sentence_size=sentence_size,
           memory_size=memory_size,
           linear_output_size=linear_output_size,
-          num_hops=num_hops)
+          num_hops=num_hops,
+          use_ln=use_ln)
       return model._apply(queries, stories)
 
     forward = hk.transform(forward_fn)
