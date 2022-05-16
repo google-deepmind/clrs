@@ -129,6 +129,18 @@ class CLRSDataset(tfds.core.GeneratorBasedBuilder):
       yield str(i), data
 
 
+def _get_clrs_file_name():
+  return f'CLRS30_v{CLRSDataset.VERSION}.tar.gz'
+
+
+def get_dataset_gcp_url():
+  return f'https://storage.googleapis.com/dm-clrs/{_get_clrs_file_name()}'
+
+
+def get_clrs_folder():
+  return f'CLRS30_v{CLRSDataset.VERSION}'
+
+
 def _preprocess(data_point, algorithm=None):
   """Convert sampled inputs into DataPoints."""
   inputs = []

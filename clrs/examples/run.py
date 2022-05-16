@@ -98,10 +98,6 @@ flags.DEFINE_boolean('freeze_processor', False,
 
 FLAGS = flags.FLAGS
 
-CLRS_FILE_NAME = 'CLRS30.tar.gz'
-CLRS_FOLDER = 'CLRS30'
-DATASET_GCP_URL = f'https://storage.googleapis.com/dm-clrs/{CLRS_FILE_NAME}'
-
 
 def unpack(v):
   try:
@@ -147,29 +143,28 @@ def collect_predictions(preds, targets, cur_preds, cur_targets):
   return (preds, targets)
 
 
-def download_dataset():
-  """Downloads CLRS30 dataset."""
-  request = requests.get(DATASET_GCP_URL, allow_redirects=True)
-  clrs_file = os.path.join(FLAGS.dataset_path, CLRS_FILE_NAME)
-  os.makedirs(FLAGS.dataset_path)
+def maybe_download_dataset():
+  """Downloads CLRS30 dataset if not already downloaded."""
+  dataset_folder = os.path.join(FLAGS.dataset_path, clrs.get_clrs_folder())
+  if os.path.isdir(dataset_folder):
+    logging.info('Dataset found at %s. Skipping download.', dataset_folder)
+    return dataset_folder
+  logging.info('Dataset not found in %s. Downloading...', dataset_folder)
+  clrs_url = clrs.get_dataset_gcp_url()
+  request = requests.get(clrs_url, allow_redirects=True)
+  clrs_file = os.path.join(FLAGS.dataset_path, os.path.basename(clrs_url))
+  os.makedirs(dataset_folder)
   open(clrs_file, 'wb').write(request.content)
-  shutil.unpack_archive(clrs_file, extract_dir=FLAGS.dataset_path)
-  extracted_folder = os.path.join(FLAGS.dataset_path, CLRS_FOLDER)
-  for file in os.listdir(extracted_folder):
-    shutil.move(os.path.join(extracted_folder, file),
-                os.path.join(FLAGS.dataset_path, file))
+  shutil.unpack_archive(clrs_file, extract_dir=dataset_folder)
   os.remove(clrs_file)
-  shutil.rmtree(extracted_folder)
+  return dataset_folder
 
 
 def main(unused_argv):
   # Use canonical CLRS-30 samplers.
   clrs30_spec = clrs.CLRS30
   logging.info('Using CLRS30 spec: %s', clrs30_spec)
-  clrs_dataset_path = os.path.join(FLAGS.dataset_path, 'clrs_dataset')
-  if not os.path.isdir(clrs_dataset_path):
-    logging.info('Dataset not found in %s. Downloading...', clrs_dataset_path)
-    download_dataset()
+  dataset_folder = maybe_download_dataset()
 
   if FLAGS.hint_mode == 'encoded_decoded_nodiff':
     encode_hints = True
@@ -194,7 +189,7 @@ def main(unused_argv):
   else:
     raise ValueError('Hint mode not in {encoded_decoded, decoded_only, none}.')
 
-  common_args = dict(folder=FLAGS.dataset_path,
+  common_args = dict(folder=dataset_folder,
                      algorithm=FLAGS.algorithm,
                      batch_size=FLAGS.batch_size)
   # Make full dataset pipeline run on CPU (including prefetching).

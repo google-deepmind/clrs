@@ -21,6 +21,8 @@ from clrs._src import processors
 from clrs._src.dataset import CLRSDataset
 from clrs._src.dataset import create_chunked_dataset
 from clrs._src.dataset import create_dataset
+from clrs._src.dataset import get_clrs_folder
+from clrs._src.dataset import get_dataset_gcp_url
 from clrs._src.model import evaluate
 from clrs._src.model import evaluate_hints
 from clrs._src.model import Model
@@ -45,6 +47,8 @@ __all__ = (
     "CLRS30",
     "create_chunked_dataset",
     "create_dataset",
+    "get_clrs_folder",
+    "get_dataset_gcp_url",
     "DataPoint",
     "evaluate",
     "evaluate_hints",
