@@ -197,7 +197,7 @@ def hint_loss(
     mask *= jnp.stack([g[truth.location] for g in gt_diffs])
   loss = jnp.sum(loss * mask) / jnp.maximum(jnp.sum(mask), EPS)
   if verbose:
-    verbose_loss[truth.name] = loss
+    verbose_loss['loss_' + truth.name] = loss
   else:
     total_loss += loss
 

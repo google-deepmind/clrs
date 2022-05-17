@@ -47,7 +47,7 @@ flags.DEFINE_integer('train_items', 160000,
                      'many full examples.')
 flags.DEFINE_integer('eval_every', 320,
                      'Logging frequency (in training examples).')
-flags.DEFINE_boolean('verbose_logging', False, 'Whether to log aux losses.')
+flags.DEFINE_boolean('verbose_logging', True, 'Whether to log aux losses.')
 
 flags.DEFINE_integer('hidden_size', 128,
                      'Number of hidden size units of the model.')
@@ -102,15 +102,20 @@ FLAGS = flags.FLAGS
 def unpack(v):
   try:
     return v.item()  # DeviceArray
-  except AttributeError:
+  except (AttributeError, ValueError):
     return v
 
 
-def evaluate(rng_key, model, feedback, extras=None, verbose=False):
+def evaluate(rng_key, model, feedback, spec, extras=None, verbose=False):
   """Evaluates a model on feedback."""
   out = {}
   predictions, aux = model.predict(rng_key, feedback.features)
-  out.update(clrs.evaluate(feedback, predictions))
+  out.update(clrs.evaluate(feedback.outputs, predictions))
+  if model.decode_hints and verbose:
+    hint_preds = [clrs.decoders.postprocess(spec, x) for x in aux[0]]
+    out.update(clrs.evaluate_hints(feedback.features.hints,
+                                   feedback.features.lengths,
+                                   hint_preds))
   if extras:
     out.update(extras)
   if verbose:
@@ -118,29 +123,52 @@ def evaluate(rng_key, model, feedback, extras=None, verbose=False):
   return {k: unpack(v) for k, v in out.items()}
 
 
-def evaluate_predictions(predictions, feedback, extras=None):
+def evaluate_preds(preds, outputs, hints, lengths, hint_preds, spec,
+                   extras=None):
   """Evaluates predictions against feedback."""
   out = {}
-  out.update(clrs.evaluate(feedback, predictions))
+  out.update(clrs.evaluate(outputs, preds))
+  if hint_preds and FLAGS.verbose_logging:
+    hint_preds = [clrs.decoders.postprocess(spec, x) for x in hint_preds]
+    out.update(clrs.evaluate_hints(hints, lengths, hint_preds))
   if extras:
     out.update(extras)
   return {k: unpack(v) for k, v in out.items()}
 
 
-def collect_predictions(preds, targets, cur_preds, cur_targets):
-  """Collect current predictions and targets into the cumulative set."""
-  if targets:
-    for k in preds:
-      preds[k].data = jnp.concatenate(
-          [preds[k].data, cur_preds[k].data], axis=0)
-    for (i, item) in enumerate(cur_targets.outputs):
-      assert targets.outputs[i].name == item.name
-      targets.outputs[i].data = jnp.concatenate(
-          [targets.outputs[i].data, item.data], axis=0)
-  else:
-    preds = cur_preds
-    targets = cur_targets
-  return (preds, targets)
+def _concat(dps, axis):
+  return jax.tree_util.tree_map(lambda *x: jnp.concatenate(x, axis), *dps)
+
+
+def collect_and_eval(sampler, predict_fn, sample_count, rng_key, spec, extras):
+  """Collect batches of output and hint preds and evaluate them."""
+  processed_samples = 0
+  preds = []
+  hint_preds = []
+  outputs = []
+  hints = []
+  lengths = []
+  while processed_samples < sample_count:
+    feedback = next(sampler)
+    outputs.append(feedback.outputs)
+    hints.append(feedback.features.hints)
+    lengths.append(feedback.features.lengths)
+    rng_key, new_rng_key = jax.random.split(rng_key)
+    cur_preds, (cur_hint_preds, _, _) = predict_fn(rng_key, feedback.features)
+    preds.append(cur_preds)
+    hint_preds.append(cur_hint_preds)
+    rng_key = new_rng_key
+    processed_samples += FLAGS.batch_size
+  outputs = _concat(outputs, axis=0)
+  preds = _concat(preds, axis=0)
+  # for hints, axis=1 because hints have time dimension first
+  hints = _concat(hints, axis=1)
+  lengths = _concat(lengths, axis=0)
+  # for hint_preds, axis=0 because the time dim is unrolled as a list
+  hint_preds = _concat(hint_preds, axis=0)
+
+  return evaluate_preds(preds, outputs, hints, lengths, hint_preds, spec,
+                        extras)
 
 
 def maybe_download_dataset():
@@ -284,6 +312,7 @@ def main(unused_argv):
           rng_key,
           eval_model,
           train_feedback,
+          spec=spec,
           extras=dict(loss=cur_loss, **common_extras),
           verbose=FLAGS.verbose_logging,
       )
@@ -291,22 +320,15 @@ def main(unused_argv):
       logging.info('(train) step %d: %s', step, train_stats)
 
       # Validation info.
-      val_processed_samples = 0
-      val_preds = {}
-      val_targets = None
-      while val_processed_samples < val_samples:
-        cur_val_feedback = next(val_sampler)
-        rng_key, new_rng_key = jax.random.split(rng_key)
-        cur_val_preds, _ = eval_model.predict(
-            rng_key, cur_val_feedback.features)
-        val_preds, val_targets = collect_predictions(
-            val_preds, val_targets, cur_val_preds, cur_val_feedback)
-        rng_key = new_rng_key
-        val_processed_samples += FLAGS.batch_size
-
-      val_stats = evaluate_predictions(
-          val_preds, val_targets,
+      rng_key, new_rng_key = jax.random.split(rng_key)
+      val_stats = collect_and_eval(
+          val_sampler,
+          eval_model.predict,
+          val_samples,
+          rng_key,
+          spec=spec,
           extras=common_extras)
+      rng_key = new_rng_key
       logging.info('(val) step %d: %s', step, val_stats)
 
       # If best scores, update checkpoint.
@@ -323,21 +345,15 @@ def main(unused_argv):
   logging.info('Restoring best model from checkpoint...')
   eval_model.restore_model('best.pkl', only_load_processor=False)
 
-  test_processed_samples = 0
-  test_preds = {}
-  test_targets = None
-  while test_processed_samples < test_samples:
-    cur_test_feedback = next(test_sampler)
-    rng_key, new_rng_key = jax.random.split(rng_key)
-    cur_test_preds, _ = eval_model.predict(rng_key, cur_test_feedback.features)
-    test_preds, test_targets = collect_predictions(
-        test_preds, test_targets, cur_test_preds, cur_test_feedback)
-    rng_key = new_rng_key
-    test_processed_samples += FLAGS.batch_size
-
-  test_stats = evaluate_predictions(
-      test_preds, test_targets,
-      extras=dict(examples_seen=current_train_items, step=step))
+  rng_key, new_rng_key = jax.random.split(rng_key)
+  test_stats = collect_and_eval(
+      test_sampler,
+      eval_model.predict,
+      test_samples,
+      rng_key,
+      spec=spec,
+      extras=common_extras)
+  rng_key = new_rng_key
   logging.info('(test) step %d: %s', step, test_stats)
 
 

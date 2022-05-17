@@ -16,7 +16,7 @@
 """Model base classes and utilities."""
 
 import abc
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 import chex
 
 from clrs._src import probing
@@ -50,15 +50,15 @@ class Model(abc.ABC):
 
 
 def evaluate_hints(
-    feedback: samplers.Feedback,
+    hints: Tuple[probing.DataPoint],
+    lengths: _Array,
     hint_preds: List[Result],
 ) -> Dict[str, _Array]:
   """Evaluate hint predictions."""
   evals = {}
-  lengths = feedback.features.lengths
-  for truth in feedback.features.hints:
+  for truth in hints:
     assert truth.name in hint_preds[0]
-    eval_along_time = [_evaluate(truth, p[truth.name], feedback.features.hints,
+    eval_along_time = [_evaluate(truth, p[truth.name], hints,
                                  idx=i+1, lengths=lengths)
                        for (i, p) in enumerate(hint_preds)]
     evals[truth.name] = np.sum(
@@ -73,15 +73,15 @@ def evaluate_hints(
 
 
 def evaluate(
-    feedback: samplers.Feedback,
+    outputs: Tuple[probing.DataPoint],
     predictions: Result,
 ) -> Dict[str, float]:
   """Evaluate output predictions."""
   evals = {}
-  for truth in feedback.outputs:
+  for truth in outputs:
     assert truth.name in predictions
     pred = predictions[truth.name]
-    evals[truth.name] = _evaluate(truth, pred, feedback.outputs)
+    evals[truth.name] = _evaluate(truth, pred, outputs)
   # Return a single scalar score that is the mean of all output scores.
   evals['score'] = sum([v.item() for v in evals.values()]) / len(evals)
   return evals
