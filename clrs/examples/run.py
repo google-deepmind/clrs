@@ -123,12 +123,11 @@ def evaluate(rng_key, model, feedback, spec, extras=None, verbose=False):
   return {k: unpack(v) for k, v in out.items()}
 
 
-def evaluate_preds(preds, outputs, hints, lengths, hint_preds, spec,
-                   extras=None):
+def evaluate_preds(preds, outputs, hints, lengths, hint_preds, spec, extras):
   """Evaluates predictions against feedback."""
   out = {}
   out.update(clrs.evaluate(outputs, preds))
-  if hint_preds and FLAGS.verbose_logging:
+  if hint_preds:
     hint_preds = [clrs.decoders.postprocess(spec, x) for x in hint_preds]
     out.update(clrs.evaluate_hints(hints, lengths, hint_preds))
   if extras:
@@ -142,6 +141,7 @@ def _concat(dps, axis):
 
 def collect_and_eval(sampler, predict_fn, sample_count, rng_key, spec, extras):
   """Collect batches of output and hint preds and evaluate them."""
+  verbose = FLAGS.verbose_logging
   processed_samples = 0
   preds = []
   hint_preds = []
@@ -151,21 +151,23 @@ def collect_and_eval(sampler, predict_fn, sample_count, rng_key, spec, extras):
   while processed_samples < sample_count:
     feedback = next(sampler)
     outputs.append(feedback.outputs)
-    hints.append(feedback.features.hints)
-    lengths.append(feedback.features.lengths)
     rng_key, new_rng_key = jax.random.split(rng_key)
     cur_preds, (cur_hint_preds, _, _) = predict_fn(rng_key, feedback.features)
     preds.append(cur_preds)
-    hint_preds.append(cur_hint_preds)
+    if verbose:
+      hints.append(feedback.features.hints)
+      lengths.append(feedback.features.lengths)
+      hint_preds.append(cur_hint_preds)
     rng_key = new_rng_key
     processed_samples += FLAGS.batch_size
   outputs = _concat(outputs, axis=0)
   preds = _concat(preds, axis=0)
-  # for hints, axis=1 because hints have time dimension first
-  hints = _concat(hints, axis=1)
-  lengths = _concat(lengths, axis=0)
-  # for hint_preds, axis=0 because the time dim is unrolled as a list
-  hint_preds = _concat(hint_preds, axis=0)
+  if verbose:
+    # for hints, axis=1 because hints have time dimension first
+    hints = _concat(hints, axis=1)
+    lengths = _concat(lengths, axis=0)
+    # for hint_preds, axis=0 because the time dim is unrolled as a list
+    hint_preds = _concat(hint_preds, axis=0)
 
   return evaluate_preds(preds, outputs, hints, lengths, hint_preds, spec,
                         extras)
