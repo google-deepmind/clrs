@@ -47,7 +47,7 @@ flags.DEFINE_integer('train_items', 160000,
                      'many full examples.')
 flags.DEFINE_integer('eval_every', 320,
                      'Logging frequency (in training examples).')
-flags.DEFINE_boolean('verbose_logging', True, 'Whether to log aux losses.')
+flags.DEFINE_boolean('verbose_logging', False, 'Whether to log aux losses.')
 
 flags.DEFINE_integer('hidden_size', 128,
                      'Number of hidden size units of the model.')
