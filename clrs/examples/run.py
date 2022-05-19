@@ -242,20 +242,21 @@ def main(unused_argv):
         **common_args, split='test')
     test_sampler = test_sampler.as_numpy_iterator()
 
+  processor_factory = clrs.get_processor_factory(FLAGS.processor_type,
+                                                 use_ln=FLAGS.use_ln,
+                                                 nb_heads=FLAGS.nb_heads)
   model_params = dict(
+      processor_factory=processor_factory,
       hidden_dim=FLAGS.hidden_size,
       encode_hints=encode_hints,
       decode_hints=decode_hints,
       decode_diffs=decode_diffs,
       use_lstm=FLAGS.use_lstm,
-      kind=FLAGS.processor_type,
       learning_rate=FLAGS.learning_rate,
       checkpoint_path=FLAGS.checkpoint_path,
       freeze_processor=FLAGS.freeze_processor,
       dropout_prob=FLAGS.dropout_prob,
       hint_teacher_forcing_noise=FLAGS.hint_teacher_forcing_noise,
-      nb_heads=FLAGS.nb_heads,
-      use_ln=FLAGS.use_ln,
       )
 
   eval_model = clrs.models.BaselineModel(

@@ -25,6 +25,7 @@ import chex
 
 from clrs._src import baselines
 from clrs._src import dataset
+from clrs._src import processors
 from clrs._src import samplers
 from clrs._src import specs
 
@@ -82,7 +83,8 @@ class BaselinesTest(parameterized.TestCase):
 
     with chex.fake_jit():  # jitting makes test longer
 
-      common_args = dict(hidden_dim=8,
+      processor_factory = processors.get_processor_factory('mpnn', use_ln=False)
+      common_args = dict(processor_factory=processor_factory, hidden_dim=8,
                          learning_rate=0.01, decode_diffs=True,
                          decode_hints=True, encode_hints=True)
 
@@ -141,7 +143,8 @@ class BaselinesTest(parameterized.TestCase):
 
     with chex.fake_jit():  # jitting makes test longer
 
-      common_args = dict(hidden_dim=8,
+      processor_factory = processors.get_processor_factory('mpnn', use_ln=False)
+      common_args = dict(processor_factory=processor_factory, hidden_dim=8,
                          learning_rate=0.01, decode_diffs=True,
                          decode_hints=True, encode_hints=True)
 
@@ -210,7 +213,8 @@ class BaselinesTest(parameterized.TestCase):
     batches = [next(d) for d in ds]
 
     with chex.fake_jit():  # jitting makes test longer
-      common_args = dict(hidden_dim=8,
+      processor_factory = processors.get_processor_factory('mpnn', use_ln=False)
+      common_args = dict(processor_factory=processor_factory, hidden_dim=8,
                          learning_rate=0.01, decode_diffs=True,
                          decode_hints=True, encode_hints=True)
       if is_chunked:

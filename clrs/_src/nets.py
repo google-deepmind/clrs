@@ -82,12 +82,10 @@ class Net(hk.Module):
       encode_hints: bool,
       decode_hints: bool,
       decode_diffs: bool,
-      kind: str,
+      processor_factory: processors.ProcessorFactory,
       use_lstm: bool,
       dropout_prob: float,
       hint_teacher_forcing_noise: float,
-      nb_heads: int,
-      use_ln: bool,
       nb_dims=None,
       name: str = 'net',
   ):
@@ -101,11 +99,9 @@ class Net(hk.Module):
     self.encode_hints = encode_hints
     self.decode_hints = decode_hints
     self.decode_diffs = decode_diffs
-    self.kind = kind
+    self.processor_factory = processor_factory
     self.nb_dims = nb_dims
     self.use_lstm = use_lstm
-    self.nb_heads = nb_heads
-    self.use_ln = use_ln
 
   def _msg_passing_step(self,
                         mp_state: _MessagePassingScanState,
@@ -247,9 +243,7 @@ class Net(hk.Module):
 
     (self.encoders, self.decoders,
      self.diff_decoders) = self._construct_encoders_decoders()
-    self.processor = processors.construct_processor(
-        kind=self.kind, hidden_dim=self.hidden_dim,
-        nb_heads=self.nb_heads, use_ln=self.use_ln)
+    self.processor = self.processor_factory(self.hidden_dim)
 
     # Optionally construct LSTM.
     if self.use_lstm:
@@ -657,9 +651,7 @@ class NetChunked(Net):
 
     (self.encoders, self.decoders,
      self.diff_decoders) = self._construct_encoders_decoders()
-    self.processor = processors.construct_processor(
-        kind=self.kind, hidden_dim=self.hidden_dim,
-        nb_heads=self.nb_heads, use_ln=self.use_ln)
+    self.processor = self.processor_factory(self.hidden_dim)
     # Optionally construct LSTM.
     if self.use_lstm:
       self.lstm = hk.LSTM(

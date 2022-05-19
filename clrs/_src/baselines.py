@@ -28,6 +28,7 @@ from clrs._src import losses
 from clrs._src import model
 from clrs._src import nets
 from clrs._src import probing
+from clrs._src import processors
 from clrs._src import samplers
 from clrs._src import specs
 
@@ -58,9 +59,8 @@ class BaselineModel(model.Model):
       self,
       spec: Union[_Spec, List[_Spec]],
       dummy_trajectory: Union[List[_Feedback], _Feedback],
-      nb_heads: int = 1,
+      processor_factory: processors.ProcessorFactory,
       hidden_dim: int = 32,
-      kind: str = 'mpnn',
       encode_hints: bool = False,
       decode_hints: bool = True,
       decode_diffs: bool = False,
@@ -70,7 +70,6 @@ class BaselineModel(model.Model):
       freeze_processor: bool = False,
       dropout_prob: float = 0.0,
       hint_teacher_forcing_noise: float = 0.0,
-      use_ln: bool = False,
       name: str = 'base_model',
   ):
     """Constructor for BaselineModel.
@@ -86,10 +85,10 @@ class BaselineModel(model.Model):
       dummy_trajectory: Either a single feedback batch, in the single-algorithm
         case, or a list of feedback batches, in the multi-algorithm case, that
         comply with the `spec` (or list of specs), to initialize network size.
-      nb_heads: Number of heads for GAT processors.
+      processor_factory: A callable that takes an `out_size` parameter
+        and returns a processor (see `processors.py`).
       hidden_dim: Size of the hidden state of the model, i.e., size of the
         message-passing vectors.
-      kind: Type of processor (see `processors.py`).
       encode_hints: Whether to provide hints as model inputs.
       decode_hints: Whether to provide hints as model outputs.
       decode_diffs: Whether to predict masks within the model.
@@ -102,7 +101,6 @@ class BaselineModel(model.Model):
       hint_teacher_forcing_noise: Probability of using predicted hints instead
         of ground-truth hints as inputs during training (only relevant if
         `encode_hints`=True
-      use_ln: Whether or not to use layer normalisation in the processor.
       name: Model name.
 
     Raises:
@@ -134,21 +132,19 @@ class BaselineModel(model.Model):
         nb_dims[outp.name] = outp.data.shape[-1]
       self.nb_dims.append(nb_dims)
 
-    self._create_net_fns(hidden_dim, encode_hints, kind, use_lstm,
-                         dropout_prob, hint_teacher_forcing_noise,
-                         nb_heads, use_ln)
+    self._create_net_fns(hidden_dim, encode_hints, processor_factory, use_lstm,
+                         dropout_prob, hint_teacher_forcing_noise)
     self.params = None
     self.opt_state = None
     self.opt_state_skeleton = None
 
-  def _create_net_fns(self, hidden_dim, encode_hints, kind, use_lstm,
-                      dropout_prob, hint_teacher_forcing_noise,
-                      nb_heads, use_ln):
+  def _create_net_fns(self, hidden_dim, encode_hints, processor_factory,
+                      use_lstm, dropout_prob, hint_teacher_forcing_noise):
     def _use_net(*args, **kwargs):
       return nets.Net(self._spec, hidden_dim, encode_hints,
                       self.decode_hints, self.decode_diffs,
-                      kind, use_lstm, dropout_prob, hint_teacher_forcing_noise,
-                      nb_heads, use_ln, self.nb_dims)(*args, **kwargs)
+                      processor_factory, use_lstm, dropout_prob,
+                      hint_teacher_forcing_noise, self.nb_dims)(*args, **kwargs)
 
     self.net_fn = hk.transform(_use_net)
     self.net_fn_apply = jax.jit(self.net_fn.apply,
@@ -331,15 +327,14 @@ class BaselineModelChunked(BaselineModel):
     `BaselineModel`.
   """
 
-  def _create_net_fns(self, hidden_dim, encode_hints, kind, use_lstm,
-                      dropout_prob, hint_teacher_forcing_noise,
-                      nb_heads, use_ln):
+  def _create_net_fns(self, hidden_dim, encode_hints, processor_factory,
+                      use_lstm, dropout_prob, hint_teacher_forcing_noise):
     def _use_net(*args, **kwargs):
       return nets.NetChunked(
           self._spec, hidden_dim, encode_hints,
           self.decode_hints, self.decode_diffs,
-          kind, use_lstm, dropout_prob, hint_teacher_forcing_noise,
-          nb_heads, use_ln, self.nb_dims)(*args, **kwargs)
+          processor_factory, use_lstm, dropout_prob,
+          hint_teacher_forcing_noise, self.nb_dims)(*args, **kwargs)
 
     self.net_fn = hk.transform(_use_net)
     self.net_fn_apply = jax.jit(
