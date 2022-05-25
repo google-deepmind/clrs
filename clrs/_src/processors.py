@@ -27,6 +27,7 @@ import numpy as np
 
 _Array = chex.Array
 _Fn = Callable[..., Any]
+BIG_NUMBER = 1e6
 
 
 class Processor(hk.Module):
@@ -358,6 +359,11 @@ class PGN(Processor):
     if self.reduction == jnp.mean:
       msgs = jnp.sum(msgs * jnp.expand_dims(adj_mat, -1), axis=-1)
       msgs = msgs / jnp.sum(adj_mat, axis=-1, keepdims=True)
+    elif self.reduction == jnp.max:
+      maxarg = jnp.where(jnp.expand_dims(adj_mat, -1),
+                         msgs,
+                         -BIG_NUMBER)
+      msgs = jnp.max(maxarg, axis=1)
     else:
       msgs = self.reduction(msgs * jnp.expand_dims(adj_mat, -1), axis=1)
 
