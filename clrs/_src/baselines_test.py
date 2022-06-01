@@ -101,8 +101,8 @@ class BaselinesTest(parameterized.TestCase):
           spec, dummy_trajectory=chunked_batches[0], **common_args)
       b_chunked.init(chunked_batches[0].features, seed=0)
       chunked_params = b_chunked.params
-      jax.tree_multimap(np.testing.assert_array_equal,
-                        full_params, chunked_params)
+      jax.tree_map(np.testing.assert_array_equal,
+                   full_params, chunked_params)
       chunked_loss_0 = b_chunked.feedback(rng_key, chunked_batches[0])
       b_chunked.params = chunked_params
       chunked_loss_1 = b_chunked.feedback(rng_key, chunked_batches[1])
@@ -120,12 +120,12 @@ class BaselinesTest(parameterized.TestCase):
 
     # Test that gradients are the same (parameters changed equally).
     # First check that gradients were not zero, i.e., parameters have changed.
-    param_change, _ = jax.tree_flatten(jax.tree_multimap(
-        _error, full_params, new_full_params))
+    param_change, _ = jax.tree_flatten(
+        jax.tree_map(_error, full_params, new_full_params))
     self.assertGreater(np.mean(param_change), 0.1)
     # Now check that full and chunked gradients are the same.
-    jax.tree_multimap(functools.partial(np.testing.assert_allclose, rtol=1e-4),
-                      new_full_params, new_chunked_params)
+    jax.tree_map(functools.partial(np.testing.assert_allclose, rtol=1e-4),
+                 new_full_params, new_chunked_params)
 
   def test_multi_vs_single(self):
     """Test that multi = single when we only train one of the algorithms."""

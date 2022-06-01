@@ -267,7 +267,7 @@ class Net(hk.Module):
 
       if self.use_lstm:
         lstm_state = lstm_init(batch_size * nb_nodes)
-        lstm_state = jax.tree_multimap(
+        lstm_state = jax.tree_map(
             lambda x, b=batch_size, n=nb_nodes: jnp.reshape(x, [b, n, -1]),
             lstm_state)
       else:
@@ -314,7 +314,7 @@ class Net(hk.Module):
     # `algorithm_index==-1` (meaning all algorithms should be processed)
     # is used only to init parameters.
 
-    output_mp_state = jax.tree_multimap(
+    output_mp_state = jax.tree_map(
         lambda init, tail: jnp.concatenate([init[None], tail], axis=0),
         mp_state, output_mp_state)
 
@@ -672,7 +672,7 @@ class NetChunked(Net):
 
         if self.use_lstm:
           lstm_state = lstm_init(batch_size * nb_nodes)
-          lstm_state = jax.tree_multimap(
+          lstm_state = jax.tree_map(
               lambda x, b=batch_size, n=nb_nodes: jnp.reshape(x, [b, n, -1]),
               lstm_state)
           mp_state.lstm_state = lstm_state

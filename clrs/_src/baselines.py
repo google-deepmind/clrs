@@ -493,8 +493,8 @@ def filter_null_grads(grads, opt, opt_state, opt_state_skeleton):
   # Ignore params with no gradient.
   masked_grads = jax.tree_map(lambda x: x if jnp.abs(x).sum() > 0.0 else None,
                               grads)
-  flat_grads, treedef = jax.tree_util.tree_flatten(masked_grads)
-  flat_opt_state = jax.tree_util.tree_multimap(
+  flat_grads, treedef = jax.tree_flatten(masked_grads)
+  flat_opt_state = jax.tree_map(
       lambda _, x: treedef.flatten_up_to(x) if not isinstance(x, _Array) else x,
       opt_state_skeleton, opt_state)
 
@@ -505,11 +505,11 @@ def filter_null_grads(grads, opt, opt_state, opt_state_skeleton):
     """Restore tree structure, filling missing (None) leaves with original."""
     if isinstance(flat, _Array):
       return flat
-    return jax.tree_multimap(lambda x, y: x if y is None else y,
-                             original, treedef.unflatten(flat))
+    return jax.tree_map(lambda x, y: x if y is None else y,
+                        original, treedef.unflatten(flat))
 
   # Restore the state and updates tree structure.
-  new_opt_state = jax.tree_util.tree_multimap(
+  new_opt_state = jax.tree_map(
       lambda _, x, y: unflatten(x, y),
       opt_state_skeleton, flat_opt_state, opt_state)
   updates = unflatten(flat_updates, jax.tree_map(lambda x: 0., grads))
