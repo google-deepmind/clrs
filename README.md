@@ -8,35 +8,34 @@ implementations of classical algorithms. These algorithms have been selected
 from the third edition of the standard *Introduction to Algorithms* by Cormen,
 Leiserson, Rivest and Stein.
 
-## Installation
+## Getting started
 
-The CLRS Algorithmic Reasoning Benchmark can be installed with pip directly from
-GitHub, with the following command:
-
-```shell
-pip install git+git://github.com/deepmind/clrs.git
-```
-
-or from PyPI:
+The CLRS Algorithmic Reasoning Benchmark can be installed with pip, either from
+PyPI:
 
 ```shell
 pip install dm-clrs
 ```
 
-## Getting started
+or directly from GitHub (updated more frequently):
 
-To set up a Python virtual environment with the required dependencies, run:
+```shell
+pip install git+git://github.com/deepmind/clrs.git
+```
+
+You may prefer to install it in a virtual environment if any requirements
+clash with your Python installation:
 
 ```shell
 python3 -m venv clrs_env
 source clrs_env/bin/activate
-python setup.py install
+pip install git+git://github.com/deepmind/clrs.git
 ```
 
-and to run our example baseline model:
+Once installed you can run our example baseline model:
 
 ```shell
-python -m clrs.examples.run
+python3 -m clrs.examples.run
 ```
 
 If this is the first run of the example, the dataset will be downloaded and
@@ -249,11 +248,12 @@ regenerated with the generator class in `dataset.py`, as described above.
 To cite the CLRS Algorithmic Reasoning Benchmark:
 
 ```latex
-@article{deepmind2021clrs,
-  author = {Petar Veli\v{c}kovi\'{c} and Adri\`{a} Puigdom\`{e}nech Badia and
+@article{deepmind2022clrs,
+  title={The CLRS Algorithmic Reasoning Benchmark},
+  author={Petar Veli\v{c}kovi\'{c} and Adri\`{a} Puigdom\`{e}nech Badia and
     David Budden and Razvan Pascanu and Andrea Banino and Misha Dashevskiy and
     Raia Hadsell and Charles Blundell},
-  title = {The CLRS Algorithmic Reasoning Benchmark},
-  year = {2021},
+  journal={arXiv preprint arXiv:2205.15659},
+  year={2022}
 }
 ```
