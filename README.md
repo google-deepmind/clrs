@@ -3,7 +3,7 @@
 Learning representations of algorithms is an emerging area of machine learning,
 seeking to bridge concepts from neural networks with classical algorithms. The
 CLRS Algorithmic Reasoning Benchmark (CLRS) consolidates and extends previous
-work torward evaluation algorithmic reasoning by providing a suite of
+work towards evaluation algorithmic reasoning by providing a suite of
 implementations of classical algorithms. These algorithms have been selected
 from the third edition of the standard *Introduction to Algorithms* by Cormen,
 Leiserson, Rivest and Stein.
