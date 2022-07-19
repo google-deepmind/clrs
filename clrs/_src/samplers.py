@@ -24,6 +24,7 @@ from typing import Any, Callable, List, Optional, Tuple
 from clrs._src import algorithms
 from clrs._src import probing
 from clrs._src import specs
+import jax
 import numpy as np
 
 
@@ -619,24 +620,11 @@ def _batch_io(traj_io: Trajectories) -> Trajectory:
 
   assert traj_io  # non-empty
   for sample_io in traj_io:
-    for dp in sample_io:
+    for i, dp in enumerate(sample_io):
       assert dp.data.shape[0] == 1  # batching axis
+      assert traj_io[0][i].name == dp.name
 
-  batched_traj = traj_io[0]  # construct batched trajectory in-place
-  for cur_sample in traj_io[1:]:
-    for i in range(len(batched_traj)):
-      # Validate that each trajectory contains the same probes.
-      assert batched_traj[i].name == cur_sample[i].name
-
-      # Concatenate each probe along the trajectory/time axis.
-      batched_traj[i] = probing.DataPoint(
-          name=batched_traj[i].name,
-          location=batched_traj[i].location,
-          type_=batched_traj[i].type_,
-          data=np.concatenate([batched_traj[i].data, cur_sample[i].data],
-                              axis=0))
-
-  return batched_traj
+  return jax.tree_util.tree_map(lambda *x: np.concatenate(x), *traj_io)
 
 
 def _batch_hints(traj_hints: Trajectories) -> Tuple[Trajectory, List[int]]:
@@ -661,44 +649,23 @@ def _batch_hints(traj_hints: Trajectories) -> Tuple[Trajectory, List[int]]:
       if dp.data.shape[0] > max_steps:
         max_steps = dp.data.shape[0]
 
-  batched_traj = traj_hints[0]  # construct batched trajectory in-place
+  # Create zero-filled space for the batched hints, then copy each hint
+  # up to the corresponding length.
+  batched_traj = jax.tree_util.tree_map(
+      lambda x: np.zeros((max_steps, len(traj_hints)) + x.shape[2:]),
+      traj_hints[0])
   hint_lengths = np.zeros(len(traj_hints))
-  for i in range(len(traj_hints[0])):
-    hint_i = traj_hints[0][i]
-    assert batched_traj[i].name == hint_i.name
-    batched_traj[i] = probing.DataPoint(
-        name=batched_traj[i].name,
-        location=batched_traj[i].location,
-        type_=batched_traj[i].type_,
-        data=np.zeros((max_steps,) + hint_i.data.shape[1:]))
-    batched_traj[i].data[:hint_i.data.shape[0]] = hint_i.data
-    if i > 0:
-      assert hint_lengths[0] == hint_i.data.shape[0]
-    else:
-      hint_lengths[0] = hint_i.data.shape[0]
 
-  for hint_ind, cur_hint in enumerate(traj_hints[1:], start=1):
-    for i in range(len(cur_hint)):
-      assert batched_traj[i].name == cur_hint[i].name
-
-      # Extend the previously built stacked hint with new all-zero data point.
-      batched_traj[i] = probing.DataPoint(
-          name=batched_traj[i].name,
-          location=batched_traj[i].location,
-          type_=batched_traj[i].type_,
-          data=np.concatenate(
-              [batched_traj[i].data,
-               np.zeros((max_steps,) + cur_hint[i].data.shape[1:])], axis=1))
-
-      # Once extended, populate it only up to the current hint's length.
-      # The -1: indexes the last timestep, but keeps axis (present in cur_hint).
-      batched_traj[i].data[:cur_hint[i].data.shape[0], -1:] = cur_hint[i].data
-
+  for sample_idx, cur_sample in enumerate(traj_hints):
+    for i in range(len(cur_sample)):
+      assert batched_traj[i].name == cur_sample[i].name
+      cur_data = cur_sample[i].data
+      cur_length = cur_data.shape[0]
+      batched_traj[i].data[:cur_length, sample_idx:sample_idx+1] = cur_data
       if i > 0:
-        assert hint_lengths[hint_ind] == cur_hint[i].data.shape[0]
+        assert hint_lengths[sample_idx] == cur_length
       else:
-        hint_lengths[hint_ind] = cur_hint[i].data.shape[0]
-
+        hint_lengths[sample_idx] = cur_length
   return batched_traj, hint_lengths
 
 
