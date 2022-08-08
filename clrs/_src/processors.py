@@ -357,7 +357,7 @@ class PGN(Processor):
       msgs = self.mid_act(msgs)
 
     if self.reduction == jnp.mean:
-      msgs = jnp.sum(msgs * jnp.expand_dims(adj_mat, -1), axis=-1)
+      msgs = jnp.sum(msgs * jnp.expand_dims(adj_mat, -1), axis=1)
       msgs = msgs / jnp.sum(adj_mat, axis=-1, keepdims=True)
     elif self.reduction == jnp.max:
       maxarg = jnp.where(jnp.expand_dims(adj_mat, -1),
