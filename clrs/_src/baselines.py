@@ -71,6 +71,7 @@ class BaselineModel(model.Model):
       dropout_prob: float = 0.0,
       hint_teacher_forcing_noise: float = 0.0,
       name: str = 'base_model',
+      subgraph_mode: str = None,
   ):
     """Constructor for BaselineModel.
 
@@ -133,18 +134,20 @@ class BaselineModel(model.Model):
       self.nb_dims.append(nb_dims)
 
     self._create_net_fns(hidden_dim, encode_hints, processor_factory, use_lstm,
-                         dropout_prob, hint_teacher_forcing_noise)
+                         dropout_prob, hint_teacher_forcing_noise, subgraph_mode)
     self.params = None
     self.opt_state = None
     self.opt_state_skeleton = None
 
   def _create_net_fns(self, hidden_dim, encode_hints, processor_factory,
-                      use_lstm, dropout_prob, hint_teacher_forcing_noise):
+                      use_lstm, dropout_prob, hint_teacher_forcing_noise, subgraph_mode):
     def _use_net(*args, **kwargs):
       return nets.Net(self._spec, hidden_dim, encode_hints,
                       self.decode_hints, self.decode_diffs,
                       processor_factory, use_lstm, dropout_prob,
-                      hint_teacher_forcing_noise, self.nb_dims)(*args, **kwargs)
+                      hint_teacher_forcing_noise,
+                      subgraph_mode,
+                      self.nb_dims)(*args, **kwargs)
 
     self.net_fn = hk.transform(_use_net)
     self.net_fn_apply = jax.jit(self.net_fn.apply,
@@ -328,7 +331,7 @@ class BaselineModelChunked(BaselineModel):
   """
 
   def _create_net_fns(self, hidden_dim, encode_hints, processor_factory,
-                      use_lstm, dropout_prob, hint_teacher_forcing_noise):
+                      use_lstm, dropout_prob, hint_teacher_forcing_noise, subgraph_mode):
     def _use_net(*args, **kwargs):
       return nets.NetChunked(
           self._spec, hidden_dim, encode_hints,

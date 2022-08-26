@@ -27,6 +27,7 @@ from clrs._src import probing
 from clrs._src import processors
 from clrs._src import samplers
 from clrs._src import specs
+from clrs._src import subgraphs_utils
 
 import haiku as hk
 import jax
@@ -86,9 +87,11 @@ class Net(hk.Module):
       use_lstm: bool,
       dropout_prob: float,
       hint_teacher_forcing_noise: float,
+      subgraph_mode: str,
       nb_dims=None,
       name: str = 'net',
   ):
+
     """Constructs a `Net`."""
     super().__init__(name=name)
 
@@ -102,6 +105,7 @@ class Net(hk.Module):
     self.processor_factory = processor_factory
     self.nb_dims = nb_dims
     self.use_lstm = use_lstm
+    self.subgraph_mode = subgraph_mode
 
   def _msg_passing_step(self,
                         mp_state: _MessagePassingScanState,
@@ -147,29 +151,38 @@ class Net(hk.Module):
             probing.DataPoint(
                 name=hint.name, location=loc, type_=typ, data=hint_data))
 
-    gt_diffs = None
-    if hints[0].data.shape[0] > 1 and self.decode_diffs:
+    def get_gt_diffs(hints, first_idx, second_idx, batch_size, nb_nodes):
       gt_diffs = {
           _Location.NODE: jnp.zeros((batch_size, nb_nodes)),
           _Location.EDGE: jnp.zeros((batch_size, nb_nodes, nb_nodes)),
           _Location.GRAPH: jnp.zeros((batch_size))
       }
       for hint in hints:
-        hint_cur = jax.lax.dynamic_index_in_dim(hint.data, i, 0, keepdims=False)
+        hint_cur = jax.lax.dynamic_index_in_dim(hint.data, first_idx, 0, keepdims=False)
         hint_nxt = jax.lax.dynamic_index_in_dim(
-            hint.data, i+1, 0, keepdims=False)
+            hint.data, second_idx, 0, keepdims=False)
         if len(hint_cur.shape) == len(gt_diffs[hint.location].shape):
           hint_cur = jnp.expand_dims(hint_cur, -1)
           hint_nxt = jnp.expand_dims(hint_nxt, -1)
         gt_diffs[hint.location] += jnp.any(hint_cur != hint_nxt, axis=-1)
       for loc in [_Location.NODE, _Location.EDGE, _Location.GRAPH]:
         gt_diffs[loc] = (gt_diffs[loc] > 0.0).astype(jnp.float32) * 1.0
+      return gt_diffs
+
+    gt_diffs = None
+    if hints[0].data.shape[0] > 1 and self.decode_diffs:
+      gt_diffs = get_gt_diffs(hints, i, i+1, batch_size, nb_nodes)
+
+    gt_diffs_prev = None
+    if hints[0].data.shape[0] > 1 and self.subgraph_mode is not None:
+      if not first_step:
+        gt_diffs_prev = get_gt_diffs(hints, i, i-1, batch_size, nb_nodes)
 
     (hiddens, output_preds_cand, hint_preds, diff_logits,
      lstm_state) = self._one_step_pred(inputs, cur_hint, mp_state.hiddens,
                                        batch_size, nb_nodes,
                                        mp_state.lstm_state,
-                                       spec, encs, decs, diff_decs)
+                                       spec, encs, decs, diff_decs, gt_diffs_prev)
 
     if first_step:
       output_preds = output_preds_cand
@@ -377,6 +390,7 @@ class Net(hk.Module):
       encs: Dict[str, List[hk.Module]],
       decs: Dict[str, Tuple[hk.Module]],
       diff_decs: Dict[str, Any],
+      gt_diffs_prev: Dict[_Location, Any],
   ):
     """Generates one-step predictions."""
 
@@ -405,12 +419,21 @@ class Net(hk.Module):
         except Exception as e:
           raise Exception(f'Failed to process {dp}') from e
 
+    msg_adj_mat = adj_mat
+    if gt_diffs_prev is not None:
+      if self.subgraph_mode == "egonets":
+        msg_adj_mat = subgraphs_utils.get_egonets(gt_diffs_prev[_Location.NODE], adj_mat)
+      elif self.subgraph_mode == "stars":
+        msg_adj_mat = subgraphs_utils.get_stars(gt_diffs_prev[_Location.NODE], adj_mat)
+      else:
+        raise ValueError(f"Invalid subgraph_mode {self.subgraph_mode}")
+
     # PROCESS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     nxt_hidden = self.processor(
         node_fts,
         edge_fts,
         graph_fts,
-        adj_mat,
+        msg_adj_mat,
         hidden,
         batch_size=batch_size,
         nb_nodes=nb_nodes,
