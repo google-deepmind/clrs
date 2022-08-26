@@ -38,7 +38,7 @@ flags.DEFINE_boolean('chunked_training', False,
 flags.DEFINE_integer('chunk_length', 100,
                      'Time chunk length used for training (if '
                      '`chunked_training` is True.')
-flags.DEFINE_integer('train_items', 160000,
+flags.DEFINE_integer('train_items', 320000,
                      'Number of items (i.e., individual examples, possibly '
                      'repeated) processed during training. With non-chunked'
                      'training, this is the number of training batches times '
@@ -51,15 +51,15 @@ flags.DEFINE_boolean('verbose_logging', False, 'Whether to log aux losses.')
 
 flags.DEFINE_integer('hidden_size', 128,
                      'Number of hidden size units of the model.')
-flags.DEFINE_float('learning_rate', 0.003, 'Learning rate to use.')
+flags.DEFINE_float('learning_rate', 0.001, 'Learning rate to use.')
 flags.DEFINE_float('dropout_prob', 0.0, 'Dropout rate to use.')
-flags.DEFINE_float('hint_teacher_forcing_noise', 0.0,
+flags.DEFINE_float('hint_teacher_forcing_noise', 0.5,
                    'Probability that rematerialized hints are encoded during '
                    'training instead of ground-truth teacher hints. Only '
                    'pertinent in encoded_decoded modes.')
 flags.DEFINE_integer('nb_heads', 1, 'Number of heads for GAT processors')
 
-flags.DEFINE_enum('hint_mode', 'encoded_decoded',
+flags.DEFINE_enum('hint_mode', 'encoded_decoded_nodiff',
                   ['encoded_decoded', 'decoded_only',
                    'encoded_decoded_nodiff', 'decoded_only_nodiff',
                    'none'],
