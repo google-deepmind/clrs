@@ -356,8 +356,9 @@ class BaselineModelChunked(BaselineModel):
         init_mp_state=True, algorithm_index=-1)
     return mp_states
 
-  def init(self, features: Union[_FeaturesChunked, List[_FeaturesChunked]],
-           seed: _Seed):
+  def init(  # pytype: disable=signature-mismatch  # overriding-parameter-type-checks
+      self, features: Union[_FeaturesChunked, List[_FeaturesChunked]],
+      seed: _Seed):
     if not isinstance(features, list):
       assert len(self._spec) == 1
       features = [features]
@@ -371,8 +372,11 @@ class BaselineModelChunked(BaselineModel):
     # want to avoid updating the state of params of untrained algorithms.
     self.opt_state_skeleton = self.opt.init(jnp.zeros(1))
 
-  def predict(self, rng_key: hk.PRNGSequence, features: _FeaturesChunked,
-              algorithm_index: Optional[int] = None):
+  def predict(  # pytype: disable=signature-mismatch  # overriding-parameter-type-checks
+      self,
+      rng_key: hk.PRNGSequence,
+      features: _FeaturesChunked,
+      algorithm_index: Optional[int] = None):
     """Inference not implemented. Chunked model intended for training only."""
     raise NotImplementedError
 
