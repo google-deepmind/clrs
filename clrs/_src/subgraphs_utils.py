@@ -27,7 +27,7 @@ def get_egonets(center_nodes, adj_mat):
 
     # [B, N]: for each graph, whether node n is a neighbour of a center_node
     center_neighbors = jnp.zeros((adj_mat.shape[0], adj_mat.shape[-1]))
-    center_neighbors = jnp.array(center_neighbors).at[graph_idx].add(center_adj_cols)
+    center_neighbors = center_neighbors.at[graph_idx].add(center_adj_cols)
 
     # Add center nodes
     ego_nodes = center_neighbors + center_nodes
@@ -35,8 +35,8 @@ def get_egonets(center_nodes, adj_mat):
     graph_idx, removed_node_idx = (ego_nodes == 0).nonzero(size=(num_graphs+1)*(num_nodes+1), fill_value=0)
 
     # Zero out edges incoming/outgoing to/from removed nodes
-    adj_mat = jnp.array(adj_mat).at[graph_idx, removed_node_idx].set(0)
-    adj_mat = jnp.array(adj_mat).at[graph_idx, :, removed_node_idx].set(0)
+    adj_mat = adj_mat.at[graph_idx, removed_node_idx].set(0)
+    adj_mat = adj_mat.at[graph_idx, :, removed_node_idx].set(0)
 
     # Remove the added node and graph
     adj_mat = adj_mat[1:, 1:, 1:]
@@ -64,10 +64,12 @@ def get_stars(center_nodes, adj_mat):
 
     # [K, N] where K is the total number of center_nodes (summed over graphs)
     center_adj_cols = adj_mat[graph_idx, :, node_idx]
+    center_adj_rows = adj_mat[graph_idx, node_idx, :]
 
-    # Zero out all edges, except those outgoing from center_nodes
+    # Zero out all edges, except those incoming/outgoing to/from center_nodes
     new_adj_mat = jnp.zeros(adj_mat.shape)
     new_adj_mat = new_adj_mat.at[graph_idx, :, node_idx].set(center_adj_cols)
+    new_adj_mat = new_adj_mat.at[graph_idx, node_idx].add(center_adj_rows)
 
     # Remove the added node and graph
     new_adj_mat = new_adj_mat[1:, 1:, 1:]
