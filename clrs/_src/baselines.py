@@ -117,7 +117,7 @@ class BaselineModel(model.Model):
     self.checkpoint_path = checkpoint_path
     self.name = name
     self._freeze_processor = freeze_processor
-    self.opt = optax.adam(learning_rate)
+    self.opt = optax.chain(optax.clip_by_global_norm(1), optax.adam(learning_rate))
 
     self.nb_dims = []
     if isinstance(dummy_trajectory, _Feedback):
