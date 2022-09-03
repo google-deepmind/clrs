@@ -327,6 +327,8 @@ class BaselineModelChunked(BaselineModel):
     `BaselineModel`.
   """
 
+  mp_states: List[nets.MessagePassingStateChunked]
+
   def _create_net_fns(self, hidden_dim, encode_hints, processor_factory,
                       use_lstm, dropout_prob, hint_teacher_forcing_noise):
     def _use_net(*args, **kwargs):
