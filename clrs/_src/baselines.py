@@ -477,6 +477,11 @@ def _is_not_done_broadcast(lengths, i, tensor):
   return is_not_done
 
 
+@functools.partial(jax.jit, static_argnames=['opt'])
+def opt_update(opt, flat_grads, flat_opt_state):
+  return opt.update(flat_grads, flat_opt_state)
+
+
 def filter_null_grads(grads, opt, opt_state, opt_state_skeleton):
   """Compute updates ignoring params that have no gradients.
 
@@ -510,7 +515,7 @@ def filter_null_grads(grads, opt, opt_state, opt_state_skeleton):
       opt_state_skeleton, opt_state)
 
   # Compute updates only for the params with gradient.
-  flat_updates, flat_opt_state = opt.update(flat_grads, flat_opt_state)
+  flat_updates, flat_opt_state = opt_update(opt, flat_grads, flat_opt_state)
 
   def unflatten(flat, original):
     """Restore tree structure, filling missing (None) leaves with original."""
