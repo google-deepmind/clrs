@@ -95,6 +95,11 @@ flags.DEFINE_string('dataset_path', '/tmp/CLRS30',
                     'Path in which dataset is stored.')
 flags.DEFINE_boolean('freeze_processor', False,
                      'Whether to freeze the processor of the model.')
+flags.DEFINE_enum('subgraph_mode', 'none',
+                  ['stars', 'egonets', 'none'],
+                  'If not `None`, then use as adjacency matrix the subgraph '
+                  'around the nodes having hints that changed from the '
+                  'last timestep ')
 
 FLAGS = flags.FLAGS
 
@@ -219,6 +224,9 @@ def main(unused_argv):
   else:
     raise ValueError('Hint mode not in {encoded_decoded, decoded_only, none}.')
 
+  if FLAGS.subgraph_mode == 'none':
+    FLAGS.subgraph_mode = None
+
   common_args = dict(folder=dataset_folder,
                      algorithm=FLAGS.algorithm,
                      batch_size=FLAGS.batch_size)
@@ -257,6 +265,7 @@ def main(unused_argv):
       freeze_processor=FLAGS.freeze_processor,
       dropout_prob=FLAGS.dropout_prob,
       hint_teacher_forcing_noise=FLAGS.hint_teacher_forcing_noise,
+      subgraph_mode=FLAGS.subgraph_mode,
       )
 
   eval_model = clrs.models.BaselineModel(
