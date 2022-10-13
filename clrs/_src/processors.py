@@ -16,7 +16,7 @@
 """JAX implementation of baseline processor networks."""
 
 import abc
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Optional, Tuple
 
 import chex
 import haiku as hk
@@ -28,10 +28,16 @@ import numpy as np
 _Array = chex.Array
 _Fn = Callable[..., Any]
 BIG_NUMBER = 1e6
+PROCESSOR_TAG = 'clrs_processor'
 
 
 class Processor(hk.Module):
   """Processor abstract base class."""
+
+  def __init__(self, name: str):
+    if not name.endswith(PROCESSOR_TAG):
+      name = name + '_' + PROCESSOR_TAG
+    super().__init__(name=name)
 
   @abc.abstractmethod
   def __call__(
@@ -42,7 +48,7 @@ class Processor(hk.Module):
       adj_mat: _Array,
       hidden: _Array,
       **kwargs,
-  ) -> _Array:
+  ) -> Tuple[_Array, Optional[_Array]]:
     """Processor inference step.
 
     Args:
@@ -54,7 +60,8 @@ class Processor(hk.Module):
       **kwargs: Extra kwargs.
 
     Returns:
-      Output of processor inference step.
+      Output of processor inference step as a 2-tuple of (node, edge)
+      embeddings. The edge embeddings can be None.
     """
     pass
 
@@ -151,7 +158,7 @@ class GAT(Processor):
       ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
       ret = ln(ret)
 
-    return ret
+    return ret, None
 
 
 class GATFull(GAT):
@@ -279,7 +286,7 @@ class GATv2(Processor):
       ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
       ret = ln(ret)
 
-    return ret
+    return ret, None
 
 
 class GATv2Full(GATv2):
@@ -289,6 +296,35 @@ class GATv2Full(GATv2):
                adj_mat: _Array, hidden: _Array, **unused_kwargs) -> _Array:
     adj_mat = jnp.ones_like(adj_mat)
     return super().__call__(node_fts, edge_fts, graph_fts, adj_mat, hidden)
+
+
+def get_triplet_msgs(z, edge_fts, graph_fts, nb_triplet_fts):
+  """Triplet messages, as done by Dudzik and Velickovic (2022)."""
+  t_1 = hk.Linear(nb_triplet_fts)
+  t_2 = hk.Linear(nb_triplet_fts)
+  t_3 = hk.Linear(nb_triplet_fts)
+  t_e_1 = hk.Linear(nb_triplet_fts)
+  t_e_2 = hk.Linear(nb_triplet_fts)
+  t_e_3 = hk.Linear(nb_triplet_fts)
+  t_g = hk.Linear(nb_triplet_fts)
+
+  tri_1 = t_1(z)
+  tri_2 = t_2(z)
+  tri_3 = t_3(z)
+  tri_e_1 = t_e_1(edge_fts)
+  tri_e_2 = t_e_2(edge_fts)
+  tri_e_3 = t_e_3(edge_fts)
+  tri_g = t_g(graph_fts)
+
+  return (
+      jnp.expand_dims(tri_1, axis=(2, 3))    +  #   (B, N, 1, 1, H)
+      jnp.expand_dims(tri_2, axis=(1, 3))    +  # + (B, 1, N, 1, H)
+      jnp.expand_dims(tri_3, axis=(1, 2))    +  # + (B, 1, 1, N, H)
+      jnp.expand_dims(tri_e_1, axis=3)       +  # + (B, N, N, 1, H)
+      jnp.expand_dims(tri_e_2, axis=2)       +  # + (B, N, 1, N, H)
+      jnp.expand_dims(tri_e_3, axis=1)       +  # + (B, 1, N, N, H)
+      jnp.expand_dims(tri_g, axis=(1, 2, 3))    # + (B, 1, 1, 1, H)
+  )                                             # = (B, N, N, N, H)
 
 
 class PGN(Processor):
@@ -303,6 +339,8 @@ class PGN(Processor):
       reduction: _Fn = jnp.max,
       msgs_mlp_sizes: Optional[List[int]] = None,
       use_ln: bool = False,
+      use_triplets: bool = False,
+      nb_triplet_fts: int = 8,
       name: str = 'mpnn_aggr',
   ):
     super().__init__(name=name)
@@ -316,6 +354,8 @@ class PGN(Processor):
     self.reduction = reduction
     self._msgs_mlp_sizes = msgs_mlp_sizes
     self.use_ln = use_ln
+    self.use_triplets = use_triplets
+    self.nb_triplet_fts = nb_triplet_fts
 
   def __call__(
       self,
@@ -347,9 +387,22 @@ class PGN(Processor):
     msg_e = m_e(edge_fts)
     msg_g = m_g(graph_fts)
 
+    tri_msgs = None
+
+    if self.use_triplets:
+      # Triplet messages, as done by Dudzik and Velickovic (2022)
+      triplets = get_triplet_msgs(z, edge_fts, graph_fts, self.nb_triplet_fts)
+
+      o3 = hk.Linear(self.out_size)
+      tri_msgs = o3(jnp.max(triplets, axis=1))  # (B, N, N, H)
+
+      if self.activation is not None:
+        tri_msgs = self.activation(tri_msgs)
+
     msgs = (
         jnp.expand_dims(msg_1, axis=1) + jnp.expand_dims(msg_2, axis=2) +
         msg_e + jnp.expand_dims(msg_g, axis=(1, 2)))
+
     if self._msgs_mlp_sizes is not None:
       msgs = hk.nets.MLP(self._msgs_mlp_sizes)(jax.nn.relu(msgs))
 
@@ -379,17 +432,16 @@ class PGN(Processor):
       ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
       ret = ln(ret)
 
-    return ret
+    return ret, tri_msgs
 
 
 class DeepSets(PGN):
   """Deep Sets (Zaheer et al., NeurIPS 2017)."""
 
   def __call__(self, node_fts: _Array, edge_fts: _Array, graph_fts: _Array,
-               adj_mat: _Array, hidden: _Array, nb_nodes: int,
-               batch_size: int) -> _Array:
-    adj_mat = jnp.repeat(
-        jnp.expand_dims(jnp.eye(nb_nodes), 0), batch_size, axis=0)
+               adj_mat: _Array, hidden: _Array, **unused_kwargs) -> _Array:
+    assert adj_mat.ndim == 3
+    adj_mat = jnp.ones_like(adj_mat) * jnp.eye(adj_mat.shape[-1])
     return super().__call__(node_fts, edge_fts, graph_fts, adj_mat, hidden)
 
 
@@ -412,6 +464,140 @@ class PGNMask(PGN):
   @property
   def inf_bias_edge(self):
     return True
+
+
+class GPGN(Processor):
+  """Pointer Graph Networks w. update gate (Veličković et al., NeurIPS 2020)."""
+
+  def __init__(
+      self,
+      out_size: int,
+      mid_size: Optional[int] = None,
+      mid_act: Optional[_Fn] = None,
+      activation: Optional[_Fn] = jax.nn.relu,
+      reduction: _Fn = jnp.max,
+      msgs_mlp_sizes: Optional[List[int]] = None,
+      use_ln: bool = False,
+      use_triplets: bool = False,
+      nb_triplet_fts: int = 8,
+      name: str = 'mpnn_aggr',
+  ):
+    super().__init__(name=name)
+    if mid_size is None:
+      self.mid_size = out_size
+    else:
+      self.mid_size = mid_size
+    self.out_size = out_size
+    self.mid_act = mid_act
+    self.activation = activation
+    self.reduction = reduction
+    self._msgs_mlp_sizes = msgs_mlp_sizes
+    self.use_ln = use_ln
+    self.use_triplets = use_triplets
+    self.nb_triplet_fts = nb_triplet_fts
+
+  def __call__(
+      self,
+      node_fts: _Array,
+      edge_fts: _Array,
+      graph_fts: _Array,
+      adj_mat: _Array,
+      hidden: _Array,
+      **unused_kwargs,
+  ) -> _Array:
+    """MPNN inference step."""
+
+    b, n, _ = node_fts.shape
+    assert edge_fts.shape[:-1] == (b, n, n)
+    assert graph_fts.shape[:-1] == (b,)
+    assert adj_mat.shape == (b, n, n)
+
+    z = jnp.concatenate([node_fts, hidden], axis=-1)
+    m_1 = hk.Linear(self.mid_size)
+    m_2 = hk.Linear(self.mid_size)
+    m_e = hk.Linear(self.mid_size)
+    m_g = hk.Linear(self.mid_size)
+
+    o1 = hk.Linear(self.out_size)
+    o2 = hk.Linear(self.out_size)
+    gate1 = hk.Linear(self.out_size)
+    gate2 = hk.Linear(self.out_size)
+    gate3 = hk.Linear(self.out_size, b_init=hk.initializers.Constant(-3))
+
+    msg_1 = m_1(z)
+    msg_2 = m_2(z)
+    msg_e = m_e(edge_fts)
+    msg_g = m_g(graph_fts)
+
+    tri_msgs = None
+
+    if self.use_triplets:
+      # Triplet messages, as done by Dudzik and Velickovic (2022)
+      triplets = get_triplet_msgs(z, edge_fts, graph_fts, self.nb_triplet_fts)
+
+      o3 = hk.Linear(self.out_size)
+      tri_msgs = o3(jnp.max(triplets, axis=1))  # (B, N, N, H)
+
+      if self.activation is not None:
+        tri_msgs = self.activation(tri_msgs)
+
+    msgs = (
+        jnp.expand_dims(msg_1, axis=1) + jnp.expand_dims(msg_2, axis=2) +
+        msg_e + jnp.expand_dims(msg_g, axis=(1, 2)))
+    if self._msgs_mlp_sizes is not None:
+      msgs = hk.nets.MLP(self._msgs_mlp_sizes)(jax.nn.relu(msgs))
+
+    if self.mid_act is not None:
+      msgs = self.mid_act(msgs)
+
+    if self.reduction == jnp.mean:
+      msgs = jnp.sum(msgs * jnp.expand_dims(adj_mat, -1), axis=1)
+      msgs = msgs / jnp.sum(adj_mat, axis=-1, keepdims=True)
+    elif self.reduction == jnp.max:
+      maxarg = jnp.where(jnp.expand_dims(adj_mat, -1),
+                         msgs,
+                         -BIG_NUMBER)
+      msgs = jnp.max(maxarg, axis=1)
+    else:
+      msgs = self.reduction(msgs * jnp.expand_dims(adj_mat, -1), axis=1)
+
+    h_1 = o1(z)
+    h_2 = o2(msgs)
+
+    ret = h_1 + h_2
+
+    gate = jax.nn.sigmoid(gate3(jax.nn.relu(gate1(z) + gate2(msgs))))
+
+    if self.activation is not None:
+      ret = self.activation(ret)
+
+    if self.use_ln:
+      ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
+      ret = ln(ret)
+
+    ret = ret * gate + hidden * (1-gate)
+    return ret, tri_msgs
+
+
+class GPGNMask(GPGN):
+  """Masked Pointer Graph Networks + gate (Veličković et al., NeurIPS 2020)."""
+
+  @property
+  def inf_bias(self):
+    return True
+
+  @property
+  def inf_bias_edge(self):
+    return True
+
+
+class GMPNN(GPGN):
+  """Message-Passing Neural Network + gate (Gilmer et al., ICML 2017)."""
+
+  def __call__(self, node_fts: _Array, edge_fts: _Array, graph_fts: _Array,
+               adj_mat: _Array, hidden: _Array, **unused_kwargs) -> _Array:
+    adj_mat = jnp.ones_like(adj_mat)
+    return super().__call__(node_fts, edge_fts, graph_fts, adj_mat, hidden)
 
 
 class MemNetMasked(Processor):
@@ -486,7 +672,7 @@ class MemNetMasked(Processor):
 
     # Broadcast hidden state corresponding to graph features across the nodes.
     nxt_hidden = nxt_hidden[:, :-1] + nxt_hidden[:, -1:]
-    return nxt_hidden
+    return nxt_hidden, None
 
   def _apply(self, queries: _Array, stories: _Array) -> _Array:
     """Apply Memory Network to the queries and stories.
@@ -615,12 +801,14 @@ ProcessorFactory = Callable[[int], Processor]
 
 def get_processor_factory(kind: str,
                           use_ln: bool,
+                          nb_triplet_fts: int,
                           nb_heads: Optional[int] = None) -> ProcessorFactory:
   """Returns a processor factory.
 
   Args:
     kind: One of the available types of processor.
     use_ln: Whether the processor passes the output through a layernorm layer.
+    nb_triplet_fts: How many triplet features to compute.
     nb_heads: Number of attention heads for GAT processors.
   Returns:
     A callable that takes an `out_size` parameter (equal to the hidden
@@ -631,13 +819,15 @@ def get_processor_factory(kind: str,
       processor = DeepSets(
           out_size=out_size,
           msgs_mlp_sizes=[out_size, out_size],
-          use_ln=use_ln
+          use_ln=use_ln,
+          use_triplets=False,
+          nb_triplet_fts=0
       )
     elif kind == 'gat':
       processor = GAT(
           out_size=out_size,
           nb_heads=nb_heads,
-          use_ln=use_ln
+          use_ln=use_ln,
       )
     elif kind == 'gat_full':
       processor = GATFull(
@@ -673,19 +863,97 @@ def get_processor_factory(kind: str,
       processor = MPNN(
           out_size=out_size,
           msgs_mlp_sizes=[out_size, out_size],
-          use_ln=use_ln
+          use_ln=use_ln,
+          use_triplets=False,
+          nb_triplet_fts=0,
       )
     elif kind == 'pgn':
       processor = PGN(
           out_size=out_size,
           msgs_mlp_sizes=[out_size, out_size],
-          use_ln=use_ln
+          use_ln=use_ln,
+          use_triplets=False,
+          nb_triplet_fts=0,
       )
     elif kind == 'pgn_mask':
       processor = PGNMask(
           out_size=out_size,
           msgs_mlp_sizes=[out_size, out_size],
-          use_ln=use_ln
+          use_ln=use_ln,
+          use_triplets=False,
+          nb_triplet_fts=0,
+      )
+    elif kind == 'triplet_mpnn':
+      processor = MPNN(
+          out_size=out_size,
+          msgs_mlp_sizes=[out_size, out_size],
+          use_ln=use_ln,
+          use_triplets=True,
+          nb_triplet_fts=nb_triplet_fts,
+      )
+    elif kind == 'triplet_pgn':
+      processor = PGN(
+          out_size=out_size,
+          msgs_mlp_sizes=[out_size, out_size],
+          use_ln=use_ln,
+          use_triplets=True,
+          nb_triplet_fts=nb_triplet_fts,
+      )
+    elif kind == 'triplet_pgn_mask':
+      processor = PGNMask(
+          out_size=out_size,
+          msgs_mlp_sizes=[out_size, out_size],
+          use_ln=use_ln,
+          use_triplets=True,
+          nb_triplet_fts=nb_triplet_fts,
+      )
+    elif kind == 'gpgn':
+      processor = GPGN(
+          out_size=out_size,
+          msgs_mlp_sizes=[out_size, out_size],
+          use_ln=use_ln,
+          use_triplets=False,
+          nb_triplet_fts=nb_triplet_fts,
+      )
+    elif kind == 'gpgn_mask':
+      processor = GPGNMask(
+          out_size=out_size,
+          msgs_mlp_sizes=[out_size, out_size],
+          use_ln=use_ln,
+          use_triplets=False,
+          nb_triplet_fts=nb_triplet_fts,
+      )
+    elif kind == 'gmpnn':
+      processor = GMPNN(
+          out_size=out_size,
+          msgs_mlp_sizes=[out_size, out_size],
+          use_ln=use_ln,
+          use_triplets=False,
+          nb_triplet_fts=nb_triplet_fts,
+      )
+    elif kind == 'triplet_gpgn':
+      processor = GPGN(
+          out_size=out_size,
+          msgs_mlp_sizes=[out_size, out_size],
+          use_ln=use_ln,
+          use_triplets=True,
+          nb_triplet_fts=nb_triplet_fts,
+      )
+    elif kind == 'triplet_gpgn_mask':
+      processor = GPGNMask(
+          out_size=out_size,
+          msgs_mlp_sizes=[out_size, out_size],
+          use_ln=use_ln,
+          use_triplets=True,
+          nb_triplet_fts=nb_triplet_fts,
+      )
+    elif kind == 'triplet_gmpnn':
+      processor = GMPNN(
+          out_size=out_size,
+          msgs_mlp_sizes=[out_size, out_size],
+          use_ln=use_ln,
+          use_triplets=True,
+          nb_triplet_fts=nb_triplet_fts,
       )
     else:
       raise ValueError('Unexpected processor kind ' + kind)

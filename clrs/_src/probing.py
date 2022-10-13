@@ -23,11 +23,13 @@ format (`ProbesDict`) to facilate efficient contest-based look-up.
 
 """
 
+import functools
 from typing import Dict, List, Tuple, Union
 
 import attr
 from clrs._src import specs
 import jax
+import jax.numpy as jnp
 import numpy as np
 import tensorflow as tf
 
@@ -308,3 +310,42 @@ def strings_pred(T_pos: np.ndarray, P_pos: np.ndarray) -> np.ndarray:
   for j in range(1, P_pos.shape[0]):
     probe[T_pos.shape[0] + P_pos[j]] = T_pos.shape[0] + P_pos[j - 1]
   return probe
+
+
+@functools.partial(jnp.vectorize, signature='(n)->(n,n),(n)')
+def predecessor_to_cyclic_predecessor_and_first(
+    pointers: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
+  """Converts predecessor pointers to cyclic predecessor + first node mask.
+
+  This function assumes that the pointers represent a linear order of the nodes
+  (akin to a linked list), where each node points to its predecessor and the
+  first node points to itself. It returns the same pointers, except that
+  the first node points to the last, and a mask_one marking the first node.
+
+  Example:
+  ```
+  pointers = [2, 1, 1]
+  P = [[0, 0, 1],
+       [1, 0, 0],
+       [0, 1, 0]],
+  M = [0, 1, 0]
+  ```
+
+  Args:
+    pointers: array of shape [N] containing pointers. The pointers are assumed
+      to describe a linear order such that `pointers[i]` is the predecessor
+      of node `i`.
+
+  Returns:
+    Permutation pointers `P` of shape [N] and one-hot vector `M` of shape [N].
+  """
+  nb_nodes = pointers.shape[-1]
+  pointers_one_hot = jax.nn.one_hot(pointers, nb_nodes)
+  # Find the index of the last node: it's the node that no other node points to.
+  last = pointers_one_hot.sum(-2).argmin()
+  # Find the first node: should be the only one pointing to itself.
+  first = pointers_one_hot.diagonal().argmax()
+  mask = jax.nn.one_hot(first, nb_nodes)
+  pointers_one_hot += mask[..., None] * jax.nn.one_hot(last, nb_nodes)
+  pointers_one_hot -= mask[..., None] * mask
+  return pointers_one_hot, mask

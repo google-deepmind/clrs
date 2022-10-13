@@ -25,6 +25,7 @@ import chex
 
 from clrs._src import baselines
 from clrs._src import dataset
+from clrs._src import probing
 from clrs._src import processors
 from clrs._src import samplers
 from clrs._src import specs
@@ -50,12 +51,37 @@ def _make_sampler(algo: str, length: int) -> samplers.Sampler:
   return sampler
 
 
+def _without_permutation(feedback):
+  """Replace should-be permutations with pointers."""
+  outputs = []
+  for x in feedback.outputs:
+    if x.type_ != specs.Type.SHOULD_BE_PERMUTATION:
+      outputs.append(x)
+      continue
+    assert x.location == specs.Location.NODE
+    outputs.append(probing.DataPoint(name=x.name, location=x.location,
+                                     type_=specs.Type.POINTER, data=x.data))
+  return feedback._replace(outputs=outputs)
+
+
 def _make_iterable_sampler(
     algo: str, batch_size: int,
     length: int) -> Generator[samplers.Feedback, None, None]:
   sampler = _make_sampler(algo, length)
   while True:
-    yield sampler.next(batch_size)
+    yield _without_permutation(sampler.next(batch_size))
+
+
+def _remove_permutation_from_spec(spec):
+  """Modify spec to turn permutation type to pointer."""
+  new_spec = {}
+  for k in spec:
+    if (spec[k][1] == specs.Location.NODE and
+        spec[k][2] == specs.Type.SHOULD_BE_PERMUTATION):
+      new_spec[k] = (spec[k][0], spec[k][1], specs.Type.POINTER)
+    else:
+      new_spec[k] = spec[k]
+  return new_spec
 
 
 class BaselinesTest(parameterized.TestCase):
@@ -66,7 +92,7 @@ class BaselinesTest(parameterized.TestCase):
     batch_size = 4
     length = 8
     algo = 'insertion_sort'
-    spec = specs.SPECS[algo]
+    spec = _remove_permutation_from_spec(specs.SPECS[algo])
     rng_key = jax.random.PRNGKey(42)
 
     full_ds = _make_iterable_sampler(algo, batch_size, length)
@@ -83,7 +109,8 @@ class BaselinesTest(parameterized.TestCase):
 
     with chex.fake_jit():  # jitting makes test longer
 
-      processor_factory = processors.get_processor_factory('mpnn', use_ln=False)
+      processor_factory = processors.get_processor_factory(
+          'mpnn', use_ln=False, nb_triplet_fts=0)
       common_args = dict(processor_factory=processor_factory, hidden_dim=8,
                          learning_rate=0.01, decode_diffs=True,
                          decode_hints=True, encode_hints=True)
@@ -99,10 +126,10 @@ class BaselinesTest(parameterized.TestCase):
 
       b_chunked = baselines.BaselineModelChunked(
           spec, dummy_trajectory=chunked_batches[0], **common_args)
-      b_chunked.init(chunked_batches[0].features, seed=0)
+      b_chunked.init([[chunked_batches[0].features]], seed=0)
       chunked_params = b_chunked.params
-      jax.tree_map(np.testing.assert_array_equal,
-                   full_params, chunked_params)
+      jax.tree_util.tree_map(np.testing.assert_array_equal, full_params,
+                             chunked_params)
       chunked_loss_0 = b_chunked.feedback(rng_key, chunked_batches[0])
       b_chunked.params = chunked_params
       chunked_loss_1 = b_chunked.feedback(rng_key, chunked_batches[1])
@@ -120,12 +147,13 @@ class BaselinesTest(parameterized.TestCase):
 
     # Test that gradients are the same (parameters changed equally).
     # First check that gradients were not zero, i.e., parameters have changed.
-    param_change, _ = jax.tree_flatten(
-        jax.tree_map(_error, full_params, new_full_params))
+    param_change, _ = jax.tree_util.tree_flatten(
+        jax.tree_util.tree_map(_error, full_params, new_full_params))
     self.assertGreater(np.mean(param_change), 0.1)
     # Now check that full and chunked gradients are the same.
-    jax.tree_map(functools.partial(np.testing.assert_allclose, rtol=1e-4),
-                 new_full_params, new_chunked_params)
+    jax.tree_util.tree_map(
+        functools.partial(np.testing.assert_allclose, rtol=1e-4),
+        new_full_params, new_chunked_params)
 
   def test_multi_vs_single(self):
     """Test that multi = single when we only train one of the algorithms."""
@@ -133,7 +161,7 @@ class BaselinesTest(parameterized.TestCase):
     batch_size = 4
     length = 16
     algos = ['insertion_sort', 'activity_selector', 'bfs']
-    spec = [specs.SPECS[algo] for algo in algos]
+    spec = [_remove_permutation_from_spec(specs.SPECS[algo]) for algo in algos]
     rng_key = jax.random.PRNGKey(42)
 
     full_ds = [_make_iterable_sampler(algo, batch_size, length)
@@ -143,7 +171,8 @@ class BaselinesTest(parameterized.TestCase):
 
     with chex.fake_jit():  # jitting makes test longer
 
-      processor_factory = processors.get_processor_factory('mpnn', use_ln=False)
+      processor_factory = processors.get_processor_factory(
+          'mpnn', use_ln=False, nb_triplet_fts=0)
       common_args = dict(processor_factory=processor_factory, hidden_dim=8,
                          learning_rate=0.01, decode_diffs=True,
                          decode_hints=True, encode_hints=True)
@@ -183,12 +212,14 @@ class BaselinesTest(parameterized.TestCase):
     for single, multi in zip(single_params, multi_params):
       assert hk.data_structures.is_subset(subset=single, superset=multi)
       for module_name, params in single.items():
-        jax.tree_map(np.testing.assert_array_equal, params, multi[module_name])
+        jax.tree_util.tree_map(np.testing.assert_array_equal, params,
+                               multi[module_name])
 
     # Test that params change for the trained algorithm, but not the others
     for module_name, params in multi_params[0].items():
-      param_changes = jax.tree_map(lambda a, b: np.sum(np.abs(a-b)),
-                                   params, multi_params[1][module_name])
+      param_changes = jax.tree_util.tree_map(lambda a, b: np.sum(np.abs(a - b)),
+                                             params,
+                                             multi_params[1][module_name])
       param_change = sum(param_changes.values())
       if module_name in single_params[0]:  # params of trained algorithm
         assert param_change > 1e-3
@@ -202,7 +233,7 @@ class BaselinesTest(parameterized.TestCase):
     batch_size = 4
     length = 8
     algos = ['insertion_sort', 'activity_selector', 'bfs']
-    spec = [specs.SPECS[algo] for algo in algos]
+    spec = [_remove_permutation_from_spec(specs.SPECS[algo]) for algo in algos]
     rng_key = jax.random.PRNGKey(42)
 
     if is_chunked:
@@ -213,24 +244,26 @@ class BaselinesTest(parameterized.TestCase):
     batches = [next(d) for d in ds]
 
     with chex.fake_jit():  # jitting makes test longer
-      processor_factory = processors.get_processor_factory('mpnn', use_ln=False)
+      processor_factory = processors.get_processor_factory(
+          'mpnn', use_ln=False, nb_triplet_fts=0)
       common_args = dict(processor_factory=processor_factory, hidden_dim=8,
                          learning_rate=0.01, decode_diffs=True,
                          decode_hints=True, encode_hints=True)
       if is_chunked:
         baseline = baselines.BaselineModelChunked(
             spec, dummy_trajectory=batches, **common_args)
+        baseline.init([[f.features for f in batches]], seed=0)
       else:
         baseline = baselines.BaselineModel(
             spec, dummy_trajectory=batches, **common_args)
-      baseline.init([f.features for f in batches], seed=0)
+        baseline.init([f.features for f in batches], seed=0)
 
       # Find out what parameters change when we train each algorithm
       def _change(x, y):
         changes = {}
         for module_name, params in x.items():
           changes[module_name] = sum(
-              jax.tree_map(
+              jax.tree_util.tree_map(
                   lambda a, b: np.sum(np.abs(a-b)), params, y[module_name]
                   ).values())
         return changes
@@ -239,7 +272,9 @@ class BaselinesTest(parameterized.TestCase):
       for algo_idx in range(len(algos)):
         init_params = copy.deepcopy(baseline.params)
         _ = baseline.feedback(
-            rng_key, batches[algo_idx], algorithm_index=algo_idx)
+            rng_key,
+            batches[algo_idx],
+            algorithm_index=(0, algo_idx) if is_chunked else algo_idx)
         param_changes.append(_change(init_params, baseline.params))
 
     # Test that non-changing parameters correspond to encoders/decoders

@@ -97,6 +97,11 @@ class CLRSDataset(tfds.core.GeneratorBasedBuilder):
     self._instantiated_dataset = data
 
   def _info(self) -> tfds.core.DatasetInfo:
+    if tf.io.gfile.exists(self.data_dir):
+      info = tfds.core.DatasetInfo(builder=self)
+      info.read_from_directory(self.data_dir)
+      return info
+
     if (self._instantiated_dataset_name != self._builder_config.name
         or self._instantiated_dataset_split != self._builder_config.split):
       self._create_data(single_sample=True)
@@ -243,11 +248,11 @@ def chunkify(dataset: Iterator[samplers.Feedback], chunk_length: int):
       break
 
   io_chunk = lambda x: np.zeros((chunk_length,) + x.shape, dtype=x.dtype)
-  chunk_inputs = jax.tree_map(io_chunk, inputs)
-  chunk_outputs = jax.tree_map(io_chunk, outputs)
+  chunk_inputs = jax.tree_util.tree_map(io_chunk, inputs)
+  chunk_outputs = jax.tree_util.tree_map(io_chunk, outputs)
 
   hint_chunk = lambda x: np.zeros((chunk_length,) + x.shape[1:], dtype=x.dtype)
-  chunk_hints = jax.tree_map(hint_chunk, hints)
+  chunk_hints = jax.tree_util.tree_map(hint_chunk, hints)
 
   inputs = [inputs]
   hints = [hints]
@@ -257,9 +262,9 @@ def chunkify(dataset: Iterator[samplers.Feedback], chunk_length: int):
 
   while True:
     # Create a new empty chunk
-    chunk_inputs = jax.tree_map(np.zeros_like, chunk_inputs)
-    chunk_hints = jax.tree_map(np.zeros_like, chunk_hints)
-    chunk_outputs = jax.tree_map(np.zeros_like, chunk_outputs)
+    chunk_inputs = jax.tree_util.tree_map(np.zeros_like, chunk_inputs)
+    chunk_hints = jax.tree_util.tree_map(np.zeros_like, chunk_hints)
+    chunk_outputs = jax.tree_util.tree_map(np.zeros_like, chunk_outputs)
     start_mark = np.zeros((chunk_length, batch_size), dtype=int)
     end_mark = np.zeros((chunk_length, batch_size), dtype=int)
 
@@ -282,11 +287,12 @@ def chunkify(dataset: Iterator[samplers.Feedback], chunk_length: int):
           assert start >= 0
           f_io = functools.partial(_copy_io, i=i, start_dest=total,
                                    to_add=to_add)
-          chunk_inputs = jax.tree_map(f_io, inputs[idx], chunk_inputs)
-          chunk_outputs = jax.tree_map(f_io, outputs[idx], chunk_outputs)
+          chunk_inputs = jax.tree_util.tree_map(f_io, inputs[idx], chunk_inputs)
+          chunk_outputs = jax.tree_util.tree_map(f_io, outputs[idx],
+                                                 chunk_outputs)
           f_hint = functools.partial(_copy_hint, i=i, start_source=start,
                                      start_dest=total, to_add=to_add)
-          chunk_hints = jax.tree_map(f_hint, hints[idx], chunk_hints)
+          chunk_hints = jax.tree_util.tree_map(f_hint, hints[idx], chunk_hints)
           if start == 0:
             start_mark[total, i] = 1
           total += to_add

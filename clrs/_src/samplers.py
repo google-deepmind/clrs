@@ -17,9 +17,11 @@
 
 import abc
 import collections
+import inspect
 import types
 
 from typing import Any, Callable, List, Optional, Tuple
+from absl import logging
 
 from clrs._src import algorithms
 from clrs._src import probing
@@ -77,7 +79,10 @@ class Sampler(abc.ABC):
     Args:
       algorithm: The algorithm to sample from
       spec: The algorithm spec.
-      num_samples: Number of algorithm unrolls to sample.
+      num_samples: Number of algorithm unrolls to sample. If positive, all the
+        samples will be generated in the constructor, and at each call
+        of the `next` method a batch will be randomly selected among them.
+        If -1, samples are generated on the fly with each call to `next`.
       *args: Algorithm args.
       seed: RNG seed.
       **kwargs: Algorithm kwargs.
@@ -85,8 +90,33 @@ class Sampler(abc.ABC):
 
     # Use `RandomState` to ensure deterministic sampling across Numpy versions.
     self._rng = np.random.RandomState(seed)
+    self._spec = spec
     self._num_samples = num_samples
+    self._algorithm = algorithm
+    self._args = args
+    self._kwargs = kwargs
 
+    if num_samples < 0:
+      logging.warning('Sampling dataset on-the-fly, unlimited samples.')
+      # Just get an initial estimate of max hint length
+      self.max_steps = -1
+      for _ in range(1000):
+        data = self._sample_data(*args, **kwargs)
+        _, probes = algorithm(*data)
+        _, _, hint = probing.split_stages(probes, spec)
+        for dp in hint:
+          assert dp.data.shape[1] == 1  # batching axis
+          if dp.data.shape[0] > self.max_steps:
+            self.max_steps = dp.data.shape[0]
+    else:
+      logging.info('Creating a dataset with %i samples.', num_samples)
+      (self._inputs, self._outputs, self._hints,
+       self._lengths) = self._make_batch(num_samples, spec, 0, algorithm, *args,
+                                         **kwargs)
+
+  def _make_batch(self, num_samples: int, spec: specs.Spec, min_length: int,
+                  algorithm: Algorithm, *args, **kwargs):
+    """Generate a batch of data."""
     inputs = []
     outputs = []
     hints = []
@@ -98,11 +128,14 @@ class Sampler(abc.ABC):
       inputs.append(inp)
       outputs.append(outp)
       hints.append(hint)
+      if len(hints) % 1000 == 0:
+        logging.info('%i samples created', len(hints))
 
     # Batch and pad trajectories to max(T).
-    self._inputs = _batch_io(inputs)
-    self._outputs = _batch_io(outputs)
-    self._hints, self._lengths = _batch_hints(hints)
+    inputs = _batch_io(inputs)
+    outputs = _batch_io(outputs)
+    hints, lengths = _batch_hints(hints, min_length)
+    return inputs, outputs, hints, lengths
 
   def next(self, batch_size: Optional[int] = None) -> Feedback:
     """Subsamples trajectories from the pre-generated dataset.
@@ -114,19 +147,30 @@ class Sampler(abc.ABC):
       Subsampled trajectories.
     """
     if batch_size:
-      if batch_size > self._num_samples:
-        raise ValueError(
-            f'Batch size {batch_size} > dataset size {self._num_samples}.')
+      if self._num_samples < 0:  # generate on the fly
+        inputs, outputs, hints, lengths = self._make_batch(
+            batch_size, self._spec, self.max_steps,
+            self._algorithm, *self._args, **self._kwargs)
+        if hints[0].data.shape[0] > self.max_steps:
+          logging.warning('Increasing hint lengh from %i to %i',
+                          self.max_steps, hints[0].data.shape[0])
+          self.max_steps = hints[0].data.shape[0]
+      else:
+        if batch_size > self._num_samples:
+          raise ValueError(
+              f'Batch size {batch_size} > dataset size {self._num_samples}.')
 
-      # Returns a fixed-size random batch.
-      indices = self._rng.choice(self._num_samples, (batch_size,), replace=True)
-      inputs = _subsample_data(self._inputs, indices, axis=0)
-      outputs = _subsample_data(self._outputs, indices, axis=0)
-      hints = _subsample_data(self._hints, indices, axis=1)
-      lengths = self._lengths[indices]
+        # Returns a fixed-size random batch.
+        indices = self._rng.choice(self._num_samples, (batch_size,),
+                                   replace=True)
+        inputs = _subsample_data(self._inputs, indices, axis=0)
+        outputs = _subsample_data(self._outputs, indices, axis=0)
+        hints = _subsample_data(self._hints, indices, axis=1)
+        lengths = self._lengths[indices]
 
     else:
       # Returns the full dataset.
+      assert self._num_samples >= 0
       inputs = self._inputs
       hints = self._hints
       lengths = self._lengths
@@ -225,8 +269,15 @@ def build_sampler(
     raise NotImplementedError(f'No implementation of algorithm {name}.')
   spec = specs.SPECS[name]
   algorithm = getattr(algorithms, name)
-  sampler = SAMPLERS[name](
-      algorithm, spec, num_samples, seed=seed, *args, **kwargs)
+  sampler_class = SAMPLERS[name]
+  # Ignore kwargs not accepted by the sampler.
+  sampler_args = inspect.signature(sampler_class._sample_data).parameters  # pylint:disable=protected-access
+  clean_kwargs = {k: kwargs[k] for k in kwargs if k in sampler_args}
+  if set(clean_kwargs) != set(kwargs):
+    logging.warning('Ignoring kwargs %s when building sampler class %s',
+                    set(kwargs).difference(clean_kwargs), sampler_class)
+  sampler = sampler_class(algorithm, spec, num_samples, seed=seed,
+                          *args, **clean_kwargs)
   return sampler, spec
 
 
@@ -341,10 +392,11 @@ class DfsSampler(Sampler):
   def _sample_data(
       self,
       length: int,
-      p: float = 0.5,
+      p: Tuple[float, ...] = (0.5,),
   ):
     graph = self._random_er_graph(
-        nb_nodes=length, p=p, directed=True, acyclic=False, weighted=False)
+        nb_nodes=length, p=self._rng.choice(p),
+        directed=True, acyclic=False, weighted=False)
     return [graph]
 
 
@@ -354,10 +406,11 @@ class BfsSampler(Sampler):
   def _sample_data(
       self,
       length: int,
-      p: float = 0.5,
+      p: Tuple[float, ...] = (0.5,),
   ):
     graph = self._random_er_graph(
-        nb_nodes=length, p=p, directed=False, acyclic=False, weighted=False)
+        nb_nodes=length, p=self._rng.choice(p),
+        directed=False, acyclic=False, weighted=False)
     source_node = self._rng.choice(length)
     return [graph, source_node]
 
@@ -368,10 +421,11 @@ class TopoSampler(Sampler):
   def _sample_data(
       self,
       length: int,
-      p: float = 0.5,
+      p: Tuple[float, ...] = (0.5,),
   ):
     graph = self._random_er_graph(
-        nb_nodes=length, p=p, directed=True, acyclic=True, weighted=False)
+        nb_nodes=length, p=self._rng.choice(p),
+        directed=True, acyclic=True, weighted=False)
     return [graph]
 
 
@@ -381,10 +435,11 @@ class ArticulationSampler(Sampler):
   def _sample_data(
       self,
       length: int,
-      p: float = 0.2,
+      p: Tuple[float, ...] = (0.2,),
   ):
     graph = self._random_er_graph(
-        nb_nodes=length, p=p, directed=False, acyclic=False, weighted=False)
+        nb_nodes=length, p=self._rng.choice(p), directed=False,
+        acyclic=False, weighted=False)
     return [graph]
 
 
@@ -394,13 +449,13 @@ class MSTSampler(Sampler):
   def _sample_data(
       self,
       length: int,
-      p: float = 0.2,  # lower p to account for class imbalance
+      p: Tuple[float, ...] = (0.2,),  # lower p to account for class imbalance
       low: float = 0.,
       high: float = 1.,
   ):
     graph = self._random_er_graph(
         nb_nodes=length,
-        p=p,
+        p=self._rng.choice(p),
         directed=False,
         acyclic=False,
         weighted=True,
@@ -415,13 +470,13 @@ class BellmanFordSampler(Sampler):
   def _sample_data(
       self,
       length: int,
-      p: float = 0.5,
+      p: Tuple[float, ...] = (0.5,),
       low: float = 0.,
       high: float = 1.,
   ):
     graph = self._random_er_graph(
         nb_nodes=length,
-        p=p,
+        p=self._rng.choice(p),
         directed=False,
         acyclic=False,
         weighted=True,
@@ -437,13 +492,13 @@ class DAGPathSampler(Sampler):
   def _sample_data(
       self,
       length: int,
-      p: float = 0.5,
+      p: Tuple[float, ...] = (0.5,),
       low: float = 0.,
       high: float = 1.,
   ):
     graph = self._random_er_graph(
         nb_nodes=length,
-        p=p,
+        p=self._rng.choice(p),
         directed=True,
         acyclic=True,
         weighted=True,
@@ -459,13 +514,13 @@ class FloydWarshallSampler(Sampler):
   def _sample_data(
       self,
       length: int,
-      p: float = 0.5,
+      p: Tuple[float, ...] = (0.5,),
       low: float = 0.,
       high: float = 1.,
   ):
     graph = self._random_er_graph(
         nb_nodes=length,
-        p=p,
+        p=self._rng.choice(p),
         directed=False,
         acyclic=False,
         weighted=True,
@@ -481,11 +536,11 @@ class SccSampler(Sampler):
       self,
       length: int,
       k: int = 4,
-      p: float = 0.5,
+      p: Tuple[float, ...] = (0.5,),
       eps: float = 0.01,
   ):
     graph = self._random_community_graph(
-        nb_nodes=length, k=k, p=p, eps=eps,
+        nb_nodes=length, k=k, p=self._rng.choice(p), eps=eps,
         directed=True, acyclic=False, weighted=False)
     return [graph]
 
@@ -497,13 +552,14 @@ class BipartiteSampler(Sampler):
       self,
       length: int,
       length_2: Optional[int] = None,
-      p: float = 0.3,
+      p: Tuple[float, ...] = (0.3,),
   ):
     if length_2 is None:
       # Assume provided length is total length.
       length_2 = length // 2
       length -= length_2
-    graph = self._random_bipartite_graph(n=length, m=length_2, p=p)
+    graph = self._random_bipartite_graph(n=length, m=length_2,
+                                         p=self._rng.choice(p))
     return [graph, length, length_2, 0, length + length_2 + 1]
 
 
@@ -512,18 +568,21 @@ class MatcherSampler(Sampler):
 
   def _sample_data(
       self,
-      length: int,
+      length: int,  # length of haystack + needle, i.e., total number of nodes
       length_needle: Optional[int] = None,
       chars: int = 4,
   ):
     if length_needle is None:
-      if length < 4:
+      if length < 5:
         length_needle = 1
       else:
-        length_needle = length // 4
+        length_needle = length // 5
+    elif length_needle < 0:  # randomize needle length
+      length_needle = self._rng.randint(1, high=1 - length_needle)
+    length_haystack = length - length_needle
     needle = self._random_string(length=length_needle, chars=chars)
-    haystack = self._random_string(length=length, chars=chars)
-    embed_pos = self._rng.choice(length - length_needle)
+    haystack = self._random_string(length=length_haystack, chars=chars)
+    embed_pos = self._rng.choice(length_haystack - length_needle)
     haystack[embed_pos:embed_pos + length_needle] = needle
     return [haystack, needle]
 
@@ -627,7 +686,8 @@ def _batch_io(traj_io: Trajectories) -> Trajectory:
   return jax.tree_util.tree_map(lambda *x: np.concatenate(x), *traj_io)
 
 
-def _batch_hints(traj_hints: Trajectories) -> Tuple[Trajectory, List[int]]:
+def _batch_hints(
+    traj_hints: Trajectories, min_steps: int) -> Tuple[Trajectory, List[int]]:
   """Batches a trajectory of hints samples along the time axis per probe.
 
   Unlike i/o, hints have a variable-length time dimension. Before batching, each
@@ -635,24 +695,27 @@ def _batch_hints(traj_hints: Trajectories) -> Tuple[Trajectory, List[int]]:
 
   Args:
     traj_hints: A hint trajectory of `DataPoints`s indexed by time then probe
+    min_steps: Hints will be padded at least to this length - if any hint is
+      longer than this, the greater length will be used.
 
   Returns:
     A |num probes| list of `DataPoint`s with the time axis stacked into `data`,
     and a |sample| list containing the length of each trajectory.
   """
 
-  max_steps = 0
+  max_steps = min_steps
   assert traj_hints  # non-empty
   for sample_hint in traj_hints:
     for dp in sample_hint:
       assert dp.data.shape[1] == 1  # batching axis
       if dp.data.shape[0] > max_steps:
         max_steps = dp.data.shape[0]
+  time_and_batch = (max_steps, len(traj_hints))
 
   # Create zero-filled space for the batched hints, then copy each hint
   # up to the corresponding length.
   batched_traj = jax.tree_util.tree_map(
-      lambda x: np.zeros((max_steps, len(traj_hints)) + x.shape[2:]),
+      lambda x: np.zeros(time_and_batch + x.shape[2:]),
       traj_hints[0])
   hint_lengths = np.zeros(len(traj_hints))
 
@@ -681,3 +744,139 @@ def _subsample_data(
     sampled_traj.append(
         probing.DataPoint(dp.name, dp.location, dp.type_, sampled_data))
   return sampled_traj
+
+
+def _preprocess_permutations(probes, enforce_permutations):
+  """Replace should-be permutations with proper permutation pointer + mask."""
+  output = []
+  for x in probes:
+    if x.type_ != specs.Type.SHOULD_BE_PERMUTATION:
+      output.append(x)
+      continue
+    assert x.location == specs.Location.NODE
+    if enforce_permutations:
+      new_x, mask = probing.predecessor_to_cyclic_predecessor_and_first(x.data)
+      output.append(
+          probing.DataPoint(
+              name=x.name,
+              location=x.location,
+              type_=specs.Type.PERMUTATION_POINTER,
+              data=new_x))
+      output.append(
+          probing.DataPoint(
+              name=x.name + '_mask',
+              location=x.location,
+              type_=specs.Type.MASK_ONE,
+              data=mask))
+    else:
+      output.append(probing.DataPoint(name=x.name, location=x.location,
+                                      type_=specs.Type.POINTER, data=x.data))
+  return output
+
+
+def process_permutations(spec, sample_iterator, enforce_permutations):
+  """Replace should-be permutations with proper permutation pointer + mask."""
+  def _iterate():
+    while True:
+      feedback = next(sample_iterator)
+      features = feedback.features
+      inputs = _preprocess_permutations(features.inputs, enforce_permutations)
+      hints = _preprocess_permutations(features.hints, enforce_permutations)
+      outputs = _preprocess_permutations(feedback.outputs, enforce_permutations)
+      features = features._replace(inputs=tuple(inputs),
+                                   hints=tuple(hints))
+      feedback = feedback._replace(features=features,
+                                   outputs=outputs)
+      yield feedback
+
+  new_spec = {}
+  for k in spec:
+    if (spec[k][1] == specs.Location.NODE and
+        spec[k][2] == specs.Type.SHOULD_BE_PERMUTATION):
+      if enforce_permutations:
+        new_spec[k] = (spec[k][0], spec[k][1], specs.Type.PERMUTATION_POINTER)
+        new_spec[k + '_mask'] = (spec[k][0], spec[k][1], specs.Type.MASK_ONE)
+      else:
+        new_spec[k] = (spec[k][0], spec[k][1], specs.Type.POINTER)
+    else:
+      new_spec[k] = spec[k]
+
+  return new_spec, _iterate()
+
+
+def process_pred_as_input(spec, sample_iterator):
+  """Move pred_h hint to pred input."""
+  def _iterate():
+    while True:
+      feedback = next(sample_iterator)
+      features = feedback.features
+      pred_h = [h for h in features.hints if h.name == 'pred_h']
+      if pred_h:
+        assert len(pred_h) == 1
+        pred_h = pred_h[0]
+        hints = [h for h in features.hints if h.name != 'pred_h']
+        for i in range(len(features.lengths)):
+          assert np.sum(np.abs(pred_h.data[1:int(features.lengths[i]), i] -
+                               pred_h.data[0, i])) == 0.0
+        inputs = tuple(features.inputs) + (
+            probing.DataPoint(name='pred', location=pred_h.location,
+                              type_=pred_h.type_, data=pred_h.data[0]),)
+        features = features._replace(inputs=tuple(inputs),
+                                     hints=tuple(hints))
+        feedback = feedback._replace(features=features)
+      yield feedback
+
+  new_spec = {}
+  for k in spec:
+    if k == 'pred_h':
+      assert spec[k] == (specs.Stage.HINT, specs.Location.NODE,
+                         specs.Type.POINTER)
+      new_spec['pred'] = (specs.Stage.INPUT, specs.Location.NODE,
+                          specs.Type.POINTER)
+    else:
+      new_spec[k] = spec[k]
+
+  return new_spec, _iterate()
+
+
+def process_random_pos(sample_iterator, rng):
+  """Randomize the `pos` input from a sampler.
+
+  The `pos` input is, by default, a scalar uniformly spaced between 0 and 1
+  across the nodes. The exception are string algorithms (naive_string_matcher,
+  kmp_string_matcher and lcs_length), where the `pos` sequence is split into
+  needle and haystack (or first and second string, for lcs_length). Here
+  we replace the uniformly spaced `pos` with an ordered sequence of random
+  scalars, or, for string algorithms, two ordered sequences of random scalars.
+
+  Args:
+    sample_iterator: An iterator producing samples with non-random `pos` inputs.
+    rng: Numpy random generator
+  Returns:
+    An iterator returning the samples with randomized `pos` inputs.
+  """
+  def _iterate():
+    while True:
+      feedback = next(sample_iterator)
+      inputs = feedback.features.inputs
+      pos, = [x for x in inputs if x.name == 'pos']
+      batch_size, num_nodes = pos.data.shape
+      unsorted = rng.uniform(size=(batch_size, num_nodes))
+      new_pos = []
+      for i in range(batch_size):  # we check one example at a time.
+        # We find if there are splits in the pos sequence, marked by zeros.
+        # We know there will always be at least 1 zero, if there's no split.
+        split, = np.where(pos.data[i] == 0)
+        split = np.concatenate([split, [num_nodes]])
+        # We construct the randomized pos by sorting the random values in each
+        # split and concatenating them.
+        new_pos.append(
+            np.concatenate([np.sort(unsorted[i, split[j]:split[j+1]])
+                            for j in range(len(split) - 1)]))
+      pos.data = np.array(new_pos)
+      inputs = [(pos if x.name == 'pos' else x) for x in inputs]
+      features = feedback.features._replace(inputs=inputs)
+      feedback = feedback._replace(features=features)
+      yield feedback
+
+  return _iterate()

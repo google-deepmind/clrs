@@ -52,6 +52,9 @@ class Type:
   MASK = 'mask'
   MASK_ONE = 'mask_one'
   POINTER = 'pointer'
+  SHOULD_BE_PERMUTATION = 'should_be_permutation'
+  PERMUTATION_POINTER = 'permutation_pointer'
+  SOFT_POINTER = 'soft_pointer'
 
 
 class OutputClass:
@@ -111,7 +114,7 @@ SPECS = types.MappingProxyType({
     'insertion_sort': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
         'key': (Stage.INPUT, Location.NODE, Type.SCALAR),
-        'pred': (Stage.OUTPUT, Location.NODE, Type.POINTER),
+        'pred': (Stage.OUTPUT, Location.NODE, Type.SHOULD_BE_PERMUTATION),
         'pred_h': (Stage.HINT, Location.NODE, Type.POINTER),
         'i': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'j': (Stage.HINT, Location.NODE, Type.MASK_ONE)
@@ -119,7 +122,7 @@ SPECS = types.MappingProxyType({
     'bubble_sort': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
         'key': (Stage.INPUT, Location.NODE, Type.SCALAR),
-        'pred': (Stage.OUTPUT, Location.NODE, Type.POINTER),
+        'pred': (Stage.OUTPUT, Location.NODE, Type.SHOULD_BE_PERMUTATION),
         'pred_h': (Stage.HINT, Location.NODE, Type.POINTER),
         'i': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'j': (Stage.HINT, Location.NODE, Type.MASK_ONE)
@@ -127,7 +130,7 @@ SPECS = types.MappingProxyType({
     'heapsort': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
         'key': (Stage.INPUT, Location.NODE, Type.SCALAR),
-        'pred': (Stage.OUTPUT, Location.NODE, Type.POINTER),
+        'pred': (Stage.OUTPUT, Location.NODE, Type.SHOULD_BE_PERMUTATION),
         'pred_h': (Stage.HINT, Location.NODE, Type.POINTER),
         'parent': (Stage.HINT, Location.NODE, Type.POINTER),
         'i': (Stage.HINT, Location.NODE, Type.MASK_ONE),
@@ -139,7 +142,7 @@ SPECS = types.MappingProxyType({
     'quicksort': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
         'key': (Stage.INPUT, Location.NODE, Type.SCALAR),
-        'pred': (Stage.OUTPUT, Location.NODE, Type.POINTER),
+        'pred': (Stage.OUTPUT, Location.NODE, Type.SHOULD_BE_PERMUTATION),
         'pred_h': (Stage.HINT, Location.NODE, Type.POINTER),
         'p': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'r': (Stage.HINT, Location.NODE, Type.MASK_ONE),

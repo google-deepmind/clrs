@@ -69,6 +69,11 @@ def output_loss_chunked(truth: _DataPoint, pred: _Array,
     loss = -jnp.sum(
         hk.one_hot(truth.data, nb_nodes) * jax.nn.log_softmax(pred), axis=-1)
 
+  elif truth.type_ == _Type.PERMUTATION_POINTER:
+    # Predictions are NxN logits aiming to represent a doubly stochastic matrix.
+    # Compute the cross entropy between doubly stochastic pred and truth_data
+    loss = -jnp.sum(truth.data * pred, axis=-1)
+
   if mask is not None:
     mask = mask * _expand_and_broadcast_to(is_last, loss)
   else:
@@ -101,6 +106,11 @@ def output_loss(truth: _DataPoint, pred: _Array, nb_nodes: int) -> float:
         jnp.mean(-jnp.sum(
             hk.one_hot(truth.data, nb_nodes) * jax.nn.log_softmax(pred),
             axis=-1)))
+
+  elif truth.type_ == _Type.PERMUTATION_POINTER:
+    # Predictions are NxN logits aiming to represent a doubly stochastic matrix.
+    # Compute the cross entropy between doubly stochastic pred and truth_data
+    total_loss = jnp.mean(-jnp.sum(truth.data * pred, axis=-1))
 
   return total_loss
 
@@ -232,6 +242,11 @@ def _hint_loss(
     loss = -jnp.sum(
         hk.one_hot(truth_data, nb_nodes) * jax.nn.log_softmax(pred),
         axis=-1)
+
+  elif truth_type == _Type.PERMUTATION_POINTER:
+    # Predictions are NxN logits aiming to represent a doubly stochastic matrix.
+    # Compute the cross entropy between doubly stochastic pred and truth_data
+    loss = -jnp.sum(truth_data * pred, axis=-1)
 
   if mask is None:
     mask = jnp.ones_like(loss)

@@ -3,7 +3,7 @@
 Learning representations of algorithms is an emerging area of machine learning,
 seeking to bridge concepts from neural networks with classical algorithms. The
 CLRS Algorithmic Reasoning Benchmark (CLRS) consolidates and extends previous
-work torward evaluation algorithmic reasoning by providing a suite of
+work toward evaluation algorithmic reasoning by providing a suite of
 implementations of classical algorithms. These algorithms have been selected
 from the third edition of the standard *Introduction to Algorithms* by Cormen,
 Leiserson, Rivest and Stein.
@@ -91,7 +91,7 @@ train_ds, num_samples, spec = clrs.create_dataset(
 for i, feedback in enumerate(train_ds.as_numpy_iterator()):
   if i == 0:
     model.init(feedback.features, initial_seed)
-  loss = model.feedback(rng_key, feedback.features)
+  loss = model.feedback(rng_key, feedback)
 ```
 
 Here, `feedback` is a `namedtuple` with the following structure:
@@ -109,8 +109,10 @@ these contain an additional time dimension padded up to the maximum length
 true length `t <= max(T)` for each trajectory, which can be used e.g. for loss
 masking.
 
-Please see the `examples` directory for full working Graph Neural Network (GNN)
-examples using JAX and the DeepMind JAX Ecosystem of libraries.
+The `examples` directory contains a full working Graph Neural Network (GNN)
+example using JAX and the DeepMind JAX Ecosystem of libraries. It allows
+training of multiple algorithms on a single processor, as described in
+["A Generalist Neural Algorithmic Learner"](https://arxiv.org/abs/2209.11142).
 
 ## What we provide
 

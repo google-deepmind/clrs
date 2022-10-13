@@ -18,6 +18,7 @@
 from absl.testing import absltest
 from absl.testing import parameterized
 
+import chex
 from clrs._src import probing
 from clrs._src import samplers
 from clrs._src import specs
@@ -59,7 +60,8 @@ class SamplersTest(parameterized.TestCase):
     feedback_2 = sampler_2.next(batch_size)
 
     # Validate that datasets are the same.
-    jax.tree_map(np.testing.assert_array_equal, feedback_1, feedback_2)
+    jax.tree_util.tree_map(np.testing.assert_array_equal, feedback_1,
+                           feedback_2)
 
   def test_end_to_end(self):
     num_samples = 7
@@ -164,10 +166,16 @@ class SamplersTest(parameterized.TestCase):
     ]
 
     trajectory = [sample0, sample1]
-    batched, lengths = samplers._batch_hints(trajectory)
+    batched, lengths = samplers._batch_hints(trajectory, 0)
 
     np.testing.assert_array_equal(batched[0].data, np.zeros([2, 2, 3]))
     np.testing.assert_array_equal(batched[1].data, np.zeros([2, 2, 3]))
+    np.testing.assert_array_equal(lengths, np.array([2, 1]))
+
+    batched, lengths = samplers._batch_hints(trajectory, 5)
+
+    np.testing.assert_array_equal(batched[0].data, np.zeros([5, 2, 3]))
+    np.testing.assert_array_equal(batched[1].data, np.zeros([5, 2, 3]))
     np.testing.assert_array_equal(lengths, np.array([2, 1]))
 
   def test_padding(self):
@@ -183,7 +191,7 @@ class SamplersTest(parameterized.TestCase):
           )
       ])
 
-    batched, lengths = samplers._batch_hints(trajectory)
+    batched, lengths = samplers._batch_hints(trajectory, 0)
     np.testing.assert_array_equal(lengths, lens)
 
     for i in range(len(lens)):
@@ -191,6 +199,51 @@ class SamplersTest(parameterized.TestCase):
       zeros = batched[0].data[lens[i]:, i, :]
       np.testing.assert_array_equal(ones, np.ones_like(ones))
       np.testing.assert_array_equal(zeros, np.zeros_like(zeros))
+
+
+class ProcessRandomPosTest(parameterized.TestCase):
+
+  @parameterized.parameters(["insertion_sort", "naive_string_matcher"])
+  def test_random_pos(self, algorithm_name):
+    batch_size, length = 12, 10
+    def _make_sampler():
+      sampler, _ = samplers.build_sampler(
+          algorithm_name,
+          seed=0,
+          num_samples=100,
+          length=length,
+          )
+      while True:
+        yield sampler.next(batch_size)
+    sampler_1 = _make_sampler()
+    sampler_2 = _make_sampler()
+    sampler_2 = samplers.process_random_pos(sampler_2, np.random.RandomState(0))
+
+    batch_without_rand_pos = next(sampler_1)
+    batch_with_rand_pos = next(sampler_2)
+    pos_idx = [x.name for x in batch_without_rand_pos.features.inputs].index(
+        "pos")
+    fixed_pos = batch_without_rand_pos.features.inputs[pos_idx]
+    rand_pos = batch_with_rand_pos.features.inputs[pos_idx]
+    self.assertEqual(rand_pos.location, specs.Location.NODE)
+    self.assertEqual(rand_pos.type_, specs.Type.SCALAR)
+    self.assertEqual(rand_pos.data.shape, (batch_size, length))
+    self.assertEqual(rand_pos.data.shape, fixed_pos.data.shape)
+    self.assertEqual(rand_pos.type_, fixed_pos.type_)
+    self.assertEqual(rand_pos.location, fixed_pos.location)
+
+    assert (rand_pos.data.std(axis=0) > 1e-3).all()
+    assert (fixed_pos.data.std(axis=0) < 1e-9).all()
+    if "string" in algorithm_name:
+      expected = np.concatenate([np.arange(4*length//5)/(4*length//5),
+                                 np.arange(length//5)/(length//5)])
+    else:
+      expected = np.arange(length)/length
+    np.testing.assert_array_equal(
+        fixed_pos.data, np.broadcast_to(expected, (batch_size, length)))
+
+    batch_with_rand_pos.features.inputs[pos_idx] = fixed_pos
+    chex.assert_trees_all_equal(batch_with_rand_pos, batch_without_rand_pos)
 
 
 if __name__ == "__main__":

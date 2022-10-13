@@ -84,16 +84,20 @@ class Net(hk.Module):
       decode_diffs: bool,
       processor_factory: processors.ProcessorFactory,
       use_lstm: bool,
+      encoder_init: str,
       dropout_prob: float,
-      hint_teacher_forcing_noise: float,
+      hint_teacher_forcing: float,
+      hint_repred_mode='soft',
       nb_dims=None,
+      nb_msg_passing_steps=1,
       name: str = 'net',
   ):
     """Constructs a `Net`."""
     super().__init__(name=name)
 
     self._dropout_prob = dropout_prob
-    self._hint_teacher_forcing_noise = hint_teacher_forcing_noise
+    self._hint_teacher_forcing = hint_teacher_forcing
+    self._hint_repred_mode = hint_repred_mode
     self.spec = spec
     self.hidden_dim = hidden_dim
     self.encode_hints = encode_hints
@@ -102,6 +106,8 @@ class Net(hk.Module):
     self.processor_factory = processor_factory
     self.nb_dims = nb_dims
     self.use_lstm = use_lstm
+    self.encoder_init = encoder_init
+    self.nb_msg_passing_steps = nb_msg_passing_steps
 
   def _msg_passing_step(self,
                         mp_state: _MessagePassingScanState,
@@ -117,10 +123,18 @@ class Net(hk.Module):
                         encs: Dict[str, List[hk.Module]],
                         decs: Dict[str, Tuple[hk.Module]],
                         diff_decs: Dict[str, Any],
+                        return_hints: bool,
+                        return_all_outputs: bool
                         ):
     if self.decode_hints and not first_step:
+      assert self._hint_repred_mode in ['soft', 'hard', 'hard_on_eval']
+      hard_postprocess = (self._hint_repred_mode == 'hard' or
+                          (self._hint_repred_mode == 'hard_on_eval' and repred))
       decoded_hint = decoders.postprocess(spec,
-                                          mp_state.hint_preds)
+                                          mp_state.hint_preds,
+                                          sinkhorn_temperature=0.1,
+                                          sinkhorn_steps=25,
+                                          hard=hard_postprocess)
     if repred and self.decode_hints and not first_step:
       cur_hint = []
       for hint in decoded_hint:
@@ -128,21 +142,29 @@ class Net(hk.Module):
     else:
       cur_hint = []
       needs_noise = (self.decode_hints and not first_step and
-                     self._hint_teacher_forcing_noise > 0)
+                     self._hint_teacher_forcing < 1.0)
       if needs_noise:
         # For noisy teacher forcing, choose which examples in the batch to force
         force_mask = jax.random.bernoulli(
-            hk.next_rng_key(), 1.0 - self._hint_teacher_forcing_noise,
+            hk.next_rng_key(), self._hint_teacher_forcing,
             (batch_size,))
       else:
         force_mask = None
       for hint in hints:
         hint_data = jnp.asarray(hint.data)[i]
+        _, loc, typ = spec[hint.name]
         if needs_noise:
+          if (typ == _Type.POINTER and
+              decoded_hint[hint.name].type_ == _Type.SOFT_POINTER):
+            # When using soft pointers, the decoded hints cannot be summarised
+            # as indices (as would happen in hard postprocessing), so we need
+            # to raise the ground-truth hint (potentially used for teacher
+            # forcing) to its one-hot version.
+            hint_data = hk.one_hot(hint_data, nb_nodes)
+            typ = _Type.SOFT_POINTER
           hint_data = jnp.where(_expand_to(force_mask, hint_data),
                                 hint_data,
                                 decoded_hint[hint.name].data)
-        _, loc, typ = spec[hint.name]
         cur_hint.append(
             probing.DataPoint(
                 name=hint.name, location=loc, type_=typ, data=hint_data))
@@ -169,7 +191,7 @@ class Net(hk.Module):
      lstm_state) = self._one_step_pred(inputs, cur_hint, mp_state.hiddens,
                                        batch_size, nb_nodes,
                                        mp_state.lstm_state,
-                                       spec, encs, decs, diff_decs)
+                                       spec, encs, decs, diff_decs, repred)
 
     if first_step:
       output_preds = output_preds_cand
@@ -204,13 +226,21 @@ class Net(hk.Module):
     new_mp_state = _MessagePassingScanState(
         hint_preds=hint_preds, diff_logits=diff_logits, gt_diffs=gt_diffs,
         output_preds=output_preds, hiddens=hiddens, lstm_state=lstm_state)
+    # Save memory by not stacking unnecessary fields
+    accum_mp_state = _MessagePassingScanState(
+        hint_preds=hint_preds if return_hints else None,
+        diff_logits=diff_logits, gt_diffs=gt_diffs,
+        output_preds=output_preds if return_all_outputs else None,
+        hiddens=None, lstm_state=None)
 
     # Complying to jax.scan, the first returned value is the state we carry over
     # the second value is the output that will be stacked over steps.
-    return new_mp_state, new_mp_state
+    return new_mp_state, accum_mp_state
 
   def __call__(self, features_list: List[_Features], repred: bool,
-               algorithm_index: int):
+               algorithm_index: int,
+               return_hints: bool,
+               return_all_outputs: bool):
     """Process one batch of data.
 
     Args:
@@ -230,6 +260,10 @@ class Net(hk.Module):
         the Net. Otherwise, `algorithm_index` should be
         between 0 and `length(self.spec) - 1`, meaning only one of the
         algorithms will be processed, and `features_list` should have length 1.
+      return_hints: Whether to accumulate and return the predicted hints,
+        when they are decoded.
+      return_all_outputs: Whether to return the full sequence of outputs, or
+        just the last step's output.
 
     Returns:
       A 4-tuple with (output predictions, hint predictions, diff logits,
@@ -267,7 +301,7 @@ class Net(hk.Module):
 
       if self.use_lstm:
         lstm_state = lstm_init(batch_size * nb_nodes)
-        lstm_state = jax.tree_map(
+        lstm_state = jax.tree_util.tree_map(
             lambda x, b=batch_size, n=nb_nodes: jnp.reshape(x, [b, n, -1]),
             lstm_state)
       else:
@@ -290,8 +324,10 @@ class Net(hk.Module):
           encs=self.encoders[algorithm_index],
           decs=self.decoders[algorithm_index],
           diff_decs=self.diff_decoders[algorithm_index],
+          return_hints=return_hints,
+          return_all_outputs=return_all_outputs,
           )
-      mp_state, _ = self._msg_passing_step(
+      mp_state, lean_mp_state = self._msg_passing_step(
           mp_state,
           i=0,
           first_step=True,
@@ -303,7 +339,7 @@ class Net(hk.Module):
           first_step=False,
           **common_args)
 
-      _, output_mp_state = hk.scan(
+      output_mp_state, accum_mp_state = hk.scan(
           scan_fn,
           mp_state,
           jnp.arange(nb_mp_steps - 1) + 1,
@@ -314,21 +350,25 @@ class Net(hk.Module):
     # `algorithm_index==-1` (meaning all algorithms should be processed)
     # is used only to init parameters.
 
-    output_mp_state = jax.tree_map(
+    accum_mp_state = jax.tree_util.tree_map(
         lambda init, tail: jnp.concatenate([init[None], tail], axis=0),
-        mp_state, output_mp_state)
+        lean_mp_state, accum_mp_state)
 
     def invert(d):
       """Dict of lists -> list of dicts."""
       if d:
         return [dict(zip(d, i)) for i in zip(*d.values())]
 
-    output_preds = invert(output_mp_state.output_preds)
-    hint_preds = invert(output_mp_state.hint_preds)
-    diff_logits = invert(output_mp_state.diff_logits)
-    gt_diffs = invert(output_mp_state.gt_diffs)
+    if return_all_outputs:
+      output_preds = {k: jnp.stack(v)
+                      for k, v in accum_mp_state.output_preds.items()}
+    else:
+      output_preds = output_mp_state.output_preds
+    hint_preds = invert(accum_mp_state.hint_preds)
+    diff_logits = invert(accum_mp_state.diff_logits)
+    gt_diffs = invert(accum_mp_state.gt_diffs)
 
-    return output_preds[-1], hint_preds, diff_logits, gt_diffs
+    return output_preds, hint_preds, diff_logits, gt_diffs
 
   def _construct_encoders_decoders(self):
     """Constructs encoders and decoders, separate for each algorithm."""
@@ -343,7 +383,8 @@ class Net(hk.Module):
             stage == _Stage.HINT and self.encode_hints):
           # Build input encoders.
           enc[name] = encoders.construct_encoders(
-              loc, t, hidden_dim=self.hidden_dim,
+              stage, loc, t, hidden_dim=self.hidden_dim,
+              init=self.encoder_init,
               name=f'algo_{algo_idx}_{name}')
 
         if stage == _Stage.OUTPUT or (
@@ -377,6 +418,7 @@ class Net(hk.Module):
       encs: Dict[str, List[hk.Module]],
       decs: Dict[str, Tuple[hk.Module]],
       diff_decs: Dict[str, Any],
+      repred: bool,
   ):
     """Generates one-step predictions."""
 
@@ -396,25 +438,29 @@ class Net(hk.Module):
     for trajectory in trajectories:
       for dp in trajectory:
         try:
-          data = encoders.preprocess(dp, nb_nodes)
-          adj_mat = encoders.accum_adj_mat(dp, data, adj_mat)
+          dp = encoders.preprocess(dp, nb_nodes)
+          assert dp.type_ != _Type.SOFT_POINTER
+          adj_mat = encoders.accum_adj_mat(dp, adj_mat)
           encoder = encs[dp.name]
-          edge_fts = encoders.accum_edge_fts(encoder, dp, data, edge_fts)
-          node_fts = encoders.accum_node_fts(encoder, dp, data, node_fts)
-          graph_fts = encoders.accum_graph_fts(encoder, dp, data, graph_fts)
+          edge_fts = encoders.accum_edge_fts(encoder, dp, edge_fts)
+          node_fts = encoders.accum_node_fts(encoder, dp, node_fts)
+          graph_fts = encoders.accum_graph_fts(encoder, dp, graph_fts)
         except Exception as e:
           raise Exception(f'Failed to process {dp}') from e
 
     # PROCESS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    nxt_hidden = self.processor(
-        node_fts,
-        edge_fts,
-        graph_fts,
-        adj_mat,
-        hidden,
-        batch_size=batch_size,
-        nb_nodes=nb_nodes,
-    )
+    nxt_hidden = hidden
+    for _ in range(self.nb_msg_passing_steps):
+      nxt_hidden, nxt_edge = self.processor(
+          node_fts,
+          edge_fts,
+          graph_fts,
+          adj_mat,
+          nxt_hidden,
+          batch_size=batch_size,
+          nb_nodes=nb_nodes,
+      )
+
     nxt_hidden = hk.dropout(hk.next_rng_key(), self._dropout_prob, nxt_hidden)
 
     if self.use_lstm:
@@ -425,6 +471,10 @@ class Net(hk.Module):
       nxt_lstm_state = None
 
     h_t = jnp.concatenate([node_fts, hidden, nxt_hidden], axis=-1)
+    if nxt_edge is not None:
+      e_t = jnp.concatenate([edge_fts, nxt_edge], axis=-1)
+    else:
+      e_t = edge_fts
 
     # DECODE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Decode features and (optionally) hints.
@@ -433,10 +483,11 @@ class Net(hk.Module):
         spec=spec,
         h_t=h_t,
         adj_mat=adj_mat,
-        edge_fts=edge_fts,
+        edge_fts=e_t,
         graph_fts=graph_fts,
         inf_bias=self.processor.inf_bias,
         inf_bias_edge=self.processor.inf_bias_edge,
+        repred=repred,
     )
 
     # Optionally decode diffs.
@@ -445,8 +496,6 @@ class Net(hk.Module):
         h_t=h_t,
         edge_fts=edge_fts,
         graph_fts=graph_fts,
-        batch_size=batch_size,
-        nb_nodes=nb_nodes,
         decode_diffs=self.decode_diffs,
     )
 
@@ -517,19 +566,33 @@ class NetChunked(Net):
       if self.decode_hints:
         if repred:
           force_mask = jnp.zeros(batch_size, dtype=bool)
-        elif self._hint_teacher_forcing_noise == 0.:
+        elif self._hint_teacher_forcing == 1.0:
           force_mask = jnp.ones(batch_size, dtype=bool)
         else:
           force_mask = jax.random.bernoulli(
-              hk.next_rng_key(), 1.0 - self._hint_teacher_forcing_noise,
+              hk.next_rng_key(), self._hint_teacher_forcing,
               (batch_size,))
-        decoded_hints = decoders.postprocess(spec, prev_hint_preds)
+        assert self._hint_repred_mode in ['soft', 'hard', 'hard_on_eval']
+        hard_postprocess = (
+            self._hint_repred_mode == 'hard' or
+            (self._hint_repred_mode == 'hard_on_eval' and repred))
+        decoded_hints = decoders.postprocess(spec,
+                                             prev_hint_preds,
+                                             sinkhorn_temperature=0.1,
+                                             sinkhorn_steps=25,
+                                             hard=hard_postprocess)
         hints_for_pred = []
         for h in hints:
+          typ = h.type_
+          hint_data = h.data
+          if (typ == _Type.POINTER and
+              decoded_hints[h.name].type_ == _Type.SOFT_POINTER):
+            hint_data = hk.one_hot(hint_data, nb_nodes)
+            typ = _Type.SOFT_POINTER
           hints_for_pred.append(probing.DataPoint(
-              name=h.name, location=h.location, type_=h.type_,
-              data=jnp.where(_expand_to(is_first | force_mask, h.data),
-                             h.data, decoded_hints[h.name].data)))
+              name=h.name, location=h.location, type_=typ,
+              data=jnp.where(_expand_to(is_first | force_mask, hint_data),
+                             hint_data, decoded_hints[h.name].data)))
       else:
         hints_for_pred = hints
 
@@ -552,7 +615,7 @@ class NetChunked(Net):
 
     hiddens = jnp.where(is_first[..., None, None], 0.0, mp_state.hiddens)
     if self.use_lstm:
-      lstm_state = jax.tree_map(
+      lstm_state = jax.tree_util.tree_map(
           lambda x: jnp.where(is_first[..., None, None], 0.0, x),
           mp_state.lstm_state)
     else:
@@ -560,7 +623,7 @@ class NetChunked(Net):
     (hiddens, output_preds, hint_preds, diff_logits,
      lstm_state) = self._one_step_pred(inputs, hints_for_pred, hiddens,
                                        batch_size, nb_nodes, lstm_state,
-                                       spec, encs, decs, diff_decs)
+                                       spec, encs, decs, diff_decs, repred)
 
     if self.decode_diffs and self.decode_hints:
       # Only output a hint predicted for this step if a difference
@@ -568,7 +631,7 @@ class NetChunked(Net):
       # was predicted for the hint. Otherwise replace the predicted hint with
       # the hint predicted at the previous step.
       if repred:
-        diff_preds = jax.tree_map(lambda x: x > 0.0, diff_logits)
+        diff_preds = jax.tree_util.tree_map(lambda x: x > 0.0, diff_logits)
       else:
         diff_preds = gt_diffs
       for hint in hints:
@@ -672,12 +735,12 @@ class NetChunked(Net):
 
         if self.use_lstm:
           lstm_state = lstm_init(batch_size * nb_nodes)
-          lstm_state = jax.tree_map(
+          lstm_state = jax.tree_util.tree_map(
               lambda x, b=batch_size, n=nb_nodes: jnp.reshape(x, [b, n, -1]),
               lstm_state)
           mp_state.lstm_state = lstm_state
-        mp_state.inputs = jax.tree_map(lambda x: x[0], inputs)
-        mp_state.hints = jax.tree_map(lambda x: x[0], hints)
+        mp_state.inputs = jax.tree_util.tree_map(lambda x: x[0], inputs)
+        mp_state.hints = jax.tree_util.tree_map(lambda x: x[0], hints)
         mp_state.is_first = jnp.zeros(batch_size, dtype=int)
         mp_state.hiddens = jnp.zeros((batch_size, nb_nodes, self.hidden_dim))
         next_is_first = jnp.ones(batch_size, dtype=int)

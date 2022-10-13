@@ -15,11 +15,13 @@
 """decoders utilities."""
 
 import functools
-from typing import Dict
+from typing import Dict, Optional
+
 import chex
 from clrs._src import probing
 from clrs._src import specs
 import haiku as hk
+import jax
 import jax.numpy as jnp
 
 _Array = chex.Array
@@ -28,6 +30,38 @@ _Location = specs.Location
 _Spec = specs.Spec
 _Stage = specs.Stage
 _Type = specs.Type
+
+
+def log_sinkhorn(x: _Array, steps: int, temperature: float, zero_diagonal: bool,
+                 noise_rng_key: Optional[_Array]) -> _Array:
+  """Sinkhorn operator in log space, to postprocess permutation pointer logits.
+
+  Args:
+    x: input of shape [..., n, n], a batch of square matrices.
+    steps: number of iterations.
+    temperature: temperature parameter (as temperature approaches zero, the
+      output approaches a permutation matrix).
+    zero_diagonal: whether to force the diagonal logits towards -inf.
+    noise_rng_key: key to add Gumbel noise.
+
+  Returns:
+    Elementwise logarithm of a doubly-stochastic matrix (a matrix with
+    non-negative elements whose rows and columns sum to 1).
+  """
+  assert x.ndim >= 2
+  assert x.shape[-1] == x.shape[-2]
+  if noise_rng_key is not None:
+    # Add standard Gumbel noise (see https://arxiv.org/abs/1802.08665)
+    noise = -jnp.log(-jnp.log(jax.random.uniform(noise_rng_key,
+                                                 x.shape) + 1e-12) + 1e-12)
+    x = x + noise
+  x /= temperature
+  if zero_diagonal:
+    x = x - 1e6 * jnp.eye(x.shape[-1])
+  for _ in range(steps):
+    x = jax.nn.log_softmax(x, axis=-1)
+    x = jax.nn.log_softmax(x, axis=-2)
+  return x
 
 
 def construct_decoders(loc: str, t: str, hidden_dim: int, nb_dims: int,
@@ -40,7 +74,7 @@ def construct_decoders(loc: str, t: str, hidden_dim: int, nb_dims: int,
       decoders = (linear(1),)
     elif t == _Type.CATEGORICAL:
       decoders = (linear(nb_dims),)
-    elif t == _Type.POINTER:
+    elif t in [_Type.POINTER, _Type.PERMUTATION_POINTER]:
       decoders = (linear(hidden_dim), linear(hidden_dim), linear(hidden_dim),
                   linear(1))
     else:
@@ -87,26 +121,76 @@ def construct_diff_decoders(name: str):
   return decoders
 
 
-def postprocess(spec: _Spec, preds: Dict[str, _Array]) -> Dict[str, _DataPoint]:
-  """Postprocesses decoder output."""
+def postprocess(spec: _Spec, preds: Dict[str, _Array],
+                sinkhorn_temperature: float,
+                sinkhorn_steps: int,
+                hard: bool) -> Dict[str, _DataPoint]:
+  """Postprocesses decoder output.
+
+  This is done on outputs in order to score performance, and on hints in
+  order to score them but also in order to feed them back to the model.
+  At scoring time, the postprocessing mode is "hard", logits will be
+  arg-maxed and masks will be thresholded. However, for the case of the hints
+  that are fed back in the model, the postprocessing can be hard or soft,
+  depending on whether we want to let gradients flow through them or not.
+
+  Args:
+    spec: The spec of the algorithm whose outputs/hints we are postprocessing.
+    preds: Output and/or hint predictions, as produced by decoders.
+    sinkhorn_temperature: Parameter for the sinkhorn operator on permutation
+      pointers.
+    sinkhorn_steps: Parameter for the sinkhorn operator on permutation
+      pointers.
+    hard: whether to do hard postprocessing, which involves argmax for
+      MASK_ONE, CATEGORICAL and POINTERS, thresholding for MASK, and stop
+      gradient through for SCALAR. If False, soft postprocessing will be used,
+      with softmax, sigmoid and gradients allowed.
+  Returns:
+    The postprocessed `preds`. In "soft" post-processing, POINTER types will
+    change to SOFT_POINTER, so encoders know they do not need to be
+    pre-processed before feeding them back in.
+  """
   result = {}
   for name in preds.keys():
     _, loc, t = spec[name]
+    new_t = t
     data = preds[name]
     if t == _Type.SCALAR:
-      pass
+      if hard:
+        data = jax.lax.stop_gradient(data)
     elif t == _Type.MASK:
-      data = (data > 0.0) * 1.0
+      if hard:
+        data = (data > 0.0) * 1.0
+      else:
+        data = jax.nn.sigmoid(data)
     elif t in [_Type.MASK_ONE, _Type.CATEGORICAL]:
       cat_size = data.shape[-1]
-      best = jnp.argmax(data, -1)
-      data = hk.one_hot(best, cat_size)
+      if hard:
+        best = jnp.argmax(data, -1)
+        data = hk.one_hot(best, cat_size)
+      else:
+        data = jax.nn.softmax(data, axis=-1)
     elif t == _Type.POINTER:
-      data = jnp.argmax(data, -1)
+      if hard:
+        data = jnp.argmax(data, -1).astype(float)
+      else:
+        data = jax.nn.softmax(data, -1)
+        new_t = _Type.SOFT_POINTER
+    elif t == _Type.PERMUTATION_POINTER:
+      # Convert the matrix of logits to a doubly stochastic matrix.
+      data = log_sinkhorn(
+          x=data,
+          steps=sinkhorn_steps,
+          temperature=sinkhorn_temperature,
+          zero_diagonal=True,
+          noise_rng_key=None)
+      data = jnp.exp(data)
+      if hard:
+        data = jax.nn.one_hot(jnp.argmax(data, axis=-1), data.shape[-1])
     else:
       raise ValueError("Invalid type")
     result[name] = probing.DataPoint(
-        name=name, location=loc, type_=t, data=data)
+        name=name, location=loc, type_=new_t, data=data)
 
   return result
 
@@ -120,6 +204,7 @@ def decode_fts(
     graph_fts: _Array,
     inf_bias: bool,
     inf_bias_edge: bool,
+    repred: bool,
 ):
   """Decodes node, edge and graph features."""
   output_preds = {}
@@ -131,7 +216,7 @@ def decode_fts(
 
     if loc == _Location.NODE:
       preds = _decode_node_fts(decoder, t, h_t, edge_fts, adj_mat,
-                               inf_bias)
+                               inf_bias, repred)
     elif loc == _Location.EDGE:
       preds = _decode_edge_fts(decoder, t, h_t, edge_fts, adj_mat,
                                inf_bias_edge)
@@ -151,14 +236,14 @@ def decode_fts(
 
 
 def _decode_node_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
-                     adj_mat: _Array, inf_bias: bool) -> _Array:
+                     adj_mat: _Array, inf_bias: bool, repred: bool) -> _Array:
   """Decodes node features."""
 
   if t in [_Type.SCALAR, _Type.MASK, _Type.MASK_ONE]:
     preds = jnp.squeeze(decoders[0](h_t), -1)
   elif t == _Type.CATEGORICAL:
     preds = decoders[0](h_t)
-  elif t == _Type.POINTER:
+  elif t in [_Type.POINTER, _Type.PERMUTATION_POINTER]:
     p_1 = decoders[0](h_t)
     p_2 = decoders[1](h_t)
     p_3 = decoders[2](edge_fts)
@@ -174,6 +259,15 @@ def _decode_node_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
       preds = jnp.where(adj_mat > 0.5,
                         preds,
                         jnp.minimum(-1.0, per_batch_min - 1.0))
+    if t == _Type.PERMUTATION_POINTER:
+      if repred:  # testing or validation, no Gumbel noise
+        preds = log_sinkhorn(
+            x=preds, steps=10, temperature=0.1,
+            zero_diagonal=True, noise_rng_key=None)
+      else:  # training, add Gumbel noise
+        preds = log_sinkhorn(
+            x=preds, steps=10, temperature=0.1,
+            zero_diagonal=True, noise_rng_key=hk.next_rng_key())
   else:
     raise ValueError("Invalid output type")
 
@@ -227,6 +321,8 @@ def _decode_graph_fts(decoders, t: str, h_t: _Array,
     pred_2 = decoders[2](h_t)
     ptr_p = jnp.expand_dims(pred, 1) + jnp.transpose(pred_2, (0, 2, 1))
     preds = jnp.squeeze(ptr_p, 1)
+  else:
+    raise ValueError("Invalid output type")
 
   return preds
 
@@ -236,10 +332,8 @@ def maybe_decode_diffs(
     h_t: _Array,
     edge_fts: _Array,
     graph_fts: _Array,
-    batch_size: int,
-    nb_nodes: int,
     decode_diffs: bool,
-) -> Dict[str, _Array]:
+) -> Optional[Dict[str, _Array]]:
   """Optionally decodes node, edge and graph diffs."""
 
   if decode_diffs:
@@ -252,11 +346,7 @@ def maybe_decode_diffs(
     preds[graph] = _decode_graph_diffs(diff_decoders[graph], h_t, graph_fts)
 
   else:
-    preds = {
-        _Location.NODE: jnp.ones((batch_size, nb_nodes)),
-        _Location.EDGE: jnp.ones((batch_size, nb_nodes, nb_nodes)),
-        _Location.GRAPH: jnp.ones((batch_size))
-    }
+    preds = None
 
   return preds
 

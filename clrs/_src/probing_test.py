@@ -18,6 +18,7 @@
 from absl.testing import absltest
 
 from clrs._src import probing
+import jax.numpy as jnp
 import numpy as np
 
 
@@ -169,6 +170,23 @@ class ProbingTest(absltest.TestCase):
     expected = np.array([0, 0, 1, 2, 3, 5, 5, 6])
     out = probing.strings_pred(T_pos, P_pos)
     np.testing.assert_array_equal(expected, out)
+
+
+class PermutationsTest(absltest.TestCase):
+
+  def test_pointers_to_permutation(self):
+    pointers = jnp.array([2, 1, 1])
+    perm, first = probing.predecessor_to_cyclic_predecessor_and_first(pointers)
+    np.testing.assert_array_equal(
+        perm, np.array([[0, 0, 1], [1, 0, 0], [0, 1, 0]]))
+    np.testing.assert_array_equal(first, np.array([0, 1, 0]))
+
+  def test_pointers_to_permutation_already_sorted(self):
+    pointers = jnp.array([0, 0, 1, 2, 3, 4])
+    perm, first = probing.predecessor_to_cyclic_predecessor_and_first(pointers)
+    np.testing.assert_array_equal(perm, np.roll(np.eye(6), 1, 0))
+    np.testing.assert_array_equal(first, np.eye(6)[0])
+
 
 if __name__ == "__main__":
   absltest.main()

@@ -18,7 +18,6 @@
 import functools
 import os
 import pickle
-
 from typing import Dict, List, Optional, Tuple, Union
 
 import chex
@@ -51,6 +50,8 @@ _Trajectory = samplers.Trajectory
 _Type = specs.Type
 _OutputClass = specs.OutputClass
 
+# pytype: disable=signature-mismatch
+
 
 class BaselineModel(model.Model):
   """Model implementation with selectable message passing algorithm."""
@@ -64,13 +65,17 @@ class BaselineModel(model.Model):
       encode_hints: bool = False,
       decode_hints: bool = True,
       decode_diffs: bool = False,
+      encoder_init: str = 'default',
       use_lstm: bool = False,
       learning_rate: float = 0.005,
+      grad_clip_max_norm: float = 0.0,
       checkpoint_path: str = '/tmp/clrs3',
       freeze_processor: bool = False,
       dropout_prob: float = 0.0,
-      hint_teacher_forcing_noise: float = 0.0,
+      hint_teacher_forcing: float = 0.0,
+      hint_repred_mode: str = 'soft',
       name: str = 'base_model',
+      nb_msg_passing_steps: int = 1,
   ):
     """Constructor for BaselineModel.
 
@@ -92,16 +97,30 @@ class BaselineModel(model.Model):
       encode_hints: Whether to provide hints as model inputs.
       decode_hints: Whether to provide hints as model outputs.
       decode_diffs: Whether to predict masks within the model.
+      encoder_init: The initialiser type to use for the encoders.
       use_lstm: Whether to insert an LSTM after message passing.
       learning_rate: Learning rate for training.
+      grad_clip_max_norm: if greater than 0, the maximum norm of the gradients.
       checkpoint_path: Path for loading/saving checkpoints.
       freeze_processor: If True, the processor weights will be frozen and
         only encoders and decoders (and, if used, the lstm) will be trained.
       dropout_prob: Dropout rate in the message-passing stage.
-      hint_teacher_forcing_noise: Probability of using predicted hints instead
-        of ground-truth hints as inputs during training (only relevant if
-        `encode_hints`=True
+      hint_teacher_forcing: Probability of using ground-truth hints instead
+        of predicted hints as inputs during training (only relevant if
+        `encode_hints`=True)
+      hint_repred_mode: How to process predicted hints when fed back as inputs.
+        Only meaningful when `encode_hints` and `decode_hints` are True.
+        Options are:
+          - 'soft', where we use softmaxes for categoricals, pointers
+              and mask_one, and sigmoids for masks. This will allow gradients
+              to flow through hints during training.
+          - 'hard', where we use argmax instead of softmax, and hard
+              thresholding of masks. No gradients will go through the hints
+              during training; even for scalar hints, which don't have any
+              kind of post-processing, gradients will be stopped.
+          - 'hard_on_eval', which is soft for training and hard for evaluation.
       name: Model name.
+      nb_msg_passing_steps: Number of message passing steps per hint.
 
     Raises:
       ValueError: if `encode_hints=True` and `decode_hints=False`.
@@ -111,12 +130,22 @@ class BaselineModel(model.Model):
     if encode_hints and not decode_hints:
       raise ValueError('`encode_hints=True`, `decode_hints=False` is invalid.')
 
+    assert hint_repred_mode in ['soft', 'hard', 'hard_on_eval']
+
     self.decode_hints = decode_hints
     self.decode_diffs = decode_diffs
     self.checkpoint_path = checkpoint_path
     self.name = name
     self._freeze_processor = freeze_processor
-    self.opt = optax.adam(learning_rate)
+    if grad_clip_max_norm != 0.0:
+      optax_chain = [optax.clip_by_global_norm(grad_clip_max_norm),
+                     optax.scale_by_adam(),
+                     optax.scale(-learning_rate)]
+      self.opt = optax.chain(*optax_chain)
+    else:
+      self.opt = optax.adam(learning_rate)
+
+    self.nb_msg_passing_steps = nb_msg_passing_steps
 
     self.nb_dims = []
     if isinstance(dummy_trajectory, _Feedback):
@@ -133,47 +162,53 @@ class BaselineModel(model.Model):
       self.nb_dims.append(nb_dims)
 
     self._create_net_fns(hidden_dim, encode_hints, processor_factory, use_lstm,
-                         dropout_prob, hint_teacher_forcing_noise)
+                         encoder_init, dropout_prob, hint_teacher_forcing,
+                         hint_repred_mode)
     self.params = None
     self.opt_state = None
     self.opt_state_skeleton = None
 
   def _create_net_fns(self, hidden_dim, encode_hints, processor_factory,
-                      use_lstm, dropout_prob, hint_teacher_forcing_noise):
+                      use_lstm, encoder_init, dropout_prob,
+                      hint_teacher_forcing, hint_repred_mode):
     def _use_net(*args, **kwargs):
       return nets.Net(self._spec, hidden_dim, encode_hints,
                       self.decode_hints, self.decode_diffs,
-                      processor_factory, use_lstm, dropout_prob,
-                      hint_teacher_forcing_noise, self.nb_dims)(*args, **kwargs)
+                      processor_factory, use_lstm, encoder_init,
+                      dropout_prob, hint_teacher_forcing,
+                      hint_repred_mode,
+                      self.nb_dims, self.nb_msg_passing_steps)(*args, **kwargs)
 
     self.net_fn = hk.transform(_use_net)
     self.net_fn_apply = jax.jit(self.net_fn.apply,
-                                static_argnames=['repred', 'algorithm_index'])
+                                static_argnames=['repred', 'algorithm_index',
+                                                 'return_hints',
+                                                 'return_all_outputs'])
     self.jitted_loss = jax.jit(self._loss, static_argnames=['algorithm_index'])
 
   def init(self, features: Union[_Features, List[_Features]], seed: _Seed):
     if not isinstance(features, list):
       assert len(self._spec) == 1
       features = [features]
-    self.params = self.net_fn.init(jax.random.PRNGKey(seed), features, True, -1)
+    self.params = self.net_fn.init(jax.random.PRNGKey(seed), features, True,
+                                   algorithm_index=-1,
+                                   return_hints=False,
+                                   return_all_outputs=False)
     self.opt_state = self.opt.init(self.params)
     # We will use the optimizer state skeleton for traversal when we
     # want to avoid updating the state of params of untrained algorithms.
     self.opt_state_skeleton = self.opt.init(jnp.zeros(1))
 
   def feedback(self, rng_key: hk.PRNGSequence, feedback: _Feedback,
-               algorithm_index: Optional[int] = None) -> float:
-    """Advance to the next task, incorporating any available feedback."""
-    if algorithm_index is None:
-      assert len(self._spec) == 1
-      algorithm_index = 0
-
-    self.params, self.opt_state, cur_loss = self.update(
-        rng_key, self.params, self.opt_state, feedback, algorithm_index)
-    return cur_loss
+               algorithm_index=None) -> float:
+    loss, grads = self.compute_grad(rng_key, feedback, algorithm_index)
+    self.update_model_params(grads)
+    return loss
 
   def predict(self, rng_key: hk.PRNGSequence, features: _Features,
-              algorithm_index: Optional[int] = None):
+              algorithm_index: Optional[int] = None,
+              return_hints: bool = False,
+              return_all_outputs: bool = False):
     """Model inference step."""
     if algorithm_index is None:
       assert len(self._spec) == 1
@@ -181,16 +216,25 @@ class BaselineModel(model.Model):
 
     outs, hint_preds, diff_logits, gt_diff = self.net_fn_apply(
         self.params, rng_key, [features],
-        repred=True, algorithm_index=algorithm_index)
-    return decoders.postprocess(self._spec[algorithm_index],
-                                outs), (hint_preds, diff_logits, gt_diff)
+        repred=True, algorithm_index=algorithm_index,
+        return_hints=return_hints,
+        return_all_outputs=return_all_outputs)
+    outs = decoders.postprocess(self._spec[algorithm_index],
+                                outs,
+                                sinkhorn_temperature=0.1,
+                                sinkhorn_steps=50,
+                                hard=True,
+                                )
+    return outs, (hint_preds, diff_logits, gt_diff)
 
   def _loss(self, params, rng_key, feedback, algorithm_index):
     """Calculates model loss f(feedback; params)."""
     (output_preds, hint_preds, diff_logits,
      gt_diffs) = self.net_fn_apply(params, rng_key, [feedback.features],
                                    repred=False,
-                                   algorithm_index=algorithm_index)
+                                   algorithm_index=algorithm_index,
+                                   return_hints=True,
+                                   return_all_outputs=False)
 
     nb_nodes = _nb_nodes(feedback, is_chunked=False)
     lengths = feedback.features.lengths
@@ -226,15 +270,13 @@ class BaselineModel(model.Model):
 
     return total_loss
 
-  def update(
+  def compute_grad(
       self,
       rng_key: hk.PRNGSequence,
-      params: hk.Params,
-      opt_state: optax.OptState,
       feedback: _Feedback,
       algorithm_index: Optional[int] = None,
-  ) -> Tuple[hk.Params, optax.OptState, _Array]:
-    """Model update step."""
+  ) -> Tuple[float, _Array]:
+    """Compute gradients."""
 
     if algorithm_index is None:
       assert len(self._spec) == 1
@@ -242,24 +284,34 @@ class BaselineModel(model.Model):
 
     # Calculate and apply gradients.
     assert algorithm_index >= 0
-    lss, grads = jax.value_and_grad(self.jitted_loss)(params, rng_key, feedback,
+    lss, grads = jax.value_and_grad(self.jitted_loss)(self.params, rng_key,
+                                                      feedback,
                                                       algorithm_index)
-    new_params, opt_state = self._update_params(params, grads, opt_state)
 
-    return new_params, opt_state, lss
+    return  lss, grads
 
   def _update_params(self, params, grads, opt_state):
     updates, opt_state = filter_null_grads(
         grads, self.opt, opt_state, self.opt_state_skeleton)
     if self._freeze_processor:
-      params_subset = _filter_processor(params)
-      updates_subset = _filter_processor(updates)
+      params_subset = _filter_out_processor(params)
+      updates_subset = _filter_out_processor(updates)
+      assert len(params) > len(params_subset)
+      assert params_subset
       new_params = optax.apply_updates(params_subset, updates_subset)
       new_params = hk.data_structures.merge(params, new_params)
     else:
       new_params = optax.apply_updates(params, updates)
 
     return new_params, opt_state
+
+  def update_model_params_accum(self, grads) -> None:
+    self.params, self.opt_state = accum_opt_update(
+        self.params, grads, self.opt_state, self.opt, self._freeze_processor)
+
+  def update_model_params(self, grads) -> None:
+    self.params, self.opt_state = self._update_params(self.params, grads,
+                                                      self.opt_state)
 
   def verbose_loss(self, feedback: _Feedback, extra_info) -> Dict[str, _Array]:
     """Gets verbose loss information."""
@@ -301,7 +353,7 @@ class BaselineModel(model.Model):
     with open(path, 'rb') as f:
       restored_state = pickle.load(f)
       if only_load_processor:
-        restored_params = _filter_processor(restored_state['params'])
+        restored_params = _filter_in_processor(restored_state['params'])
       else:
         restored_params = restored_state['params']
       self.params = hk.data_structures.merge(self.params, restored_params)
@@ -332,13 +384,15 @@ class BaselineModelChunked(BaselineModel):
   mp_states: List[nets.MessagePassingStateChunked]
 
   def _create_net_fns(self, hidden_dim, encode_hints, processor_factory,
-                      use_lstm, dropout_prob, hint_teacher_forcing_noise):
+                      use_lstm, encoder_init, dropout_prob,
+                      hint_teacher_forcing, hint_repred_mode):
     def _use_net(*args, **kwargs):
       return nets.NetChunked(
           self._spec, hidden_dim, encode_hints,
           self.decode_hints, self.decode_diffs,
-          processor_factory, use_lstm, dropout_prob,
-          hint_teacher_forcing_noise, self.nb_dims)(*args, **kwargs)
+          processor_factory, use_lstm, encoder_init, dropout_prob,
+          hint_teacher_forcing, hint_repred_mode,
+          self.nb_dims, self.nb_msg_passing_steps)(*args, **kwargs)
 
     self.net_fn = hk.transform(_use_net)
     self.net_fn_apply = jax.jit(
@@ -346,49 +400,46 @@ class BaselineModelChunked(BaselineModel):
         static_argnames=['repred', 'algorithm_index'])
     self.jitted_loss = jax.jit(self._loss, static_argnames=['algorithm_index'])
 
-  def _init_mp_state(self, features_list: List[_FeaturesChunked],
+  def _init_mp_state(self, features_list: List[List[_FeaturesChunked]],
                      rng_key: _Array):
     def _empty_mp_state():
       return nets.MessagePassingStateChunked(
           inputs=None, hints=None, is_first=None,
           hint_preds=None, hiddens=None, lstm_state=None)
-    empty_mp_states = [_empty_mp_state() for _ in range(len(features_list))]
-    dummy_params = self.net_fn.init(
-        rng_key, features_list, empty_mp_states, False,
-        init_mp_state=True, algorithm_index=-1)
-    _, mp_states = self.net_fn.apply(
-        dummy_params, rng_key, features_list, empty_mp_states, False,
-        init_mp_state=True, algorithm_index=-1)
+    empty_mp_states = [[_empty_mp_state() for _ in f] for f in features_list]
+    dummy_params = [self.net_fn.init(rng_key, f, e, False,
+                                     init_mp_state=True, algorithm_index=-1)
+                    for (f, e) in zip(features_list, empty_mp_states)]
+    mp_states = [
+        self.net_fn.apply(d, rng_key, f, e, False,
+                          init_mp_state=True, algorithm_index=-1)[1]
+        for (d, f, e) in zip(dummy_params, features_list, empty_mp_states)]
     return mp_states
 
-  def init(  # pytype: disable=signature-mismatch  # overriding-parameter-type-checks
-      self, features: Union[_FeaturesChunked, List[_FeaturesChunked]],
-      seed: _Seed):
-    if not isinstance(features, list):
-      assert len(self._spec) == 1
-      features = [features]
+  def init(self,
+           features: List[List[_FeaturesChunked]],
+           seed: _Seed):
     self.mp_states = self._init_mp_state(features,
                                          jax.random.PRNGKey(seed))
     self.params = self.net_fn.init(
-        jax.random.PRNGKey(seed), features, self.mp_states,
+        jax.random.PRNGKey(seed), features[0], self.mp_states[0],
         True, init_mp_state=False, algorithm_index=-1)
     self.opt_state = self.opt.init(self.params)
     # We will use the optimizer state skeleton for traversal when we
     # want to avoid updating the state of params of untrained algorithms.
     self.opt_state_skeleton = self.opt.init(jnp.zeros(1))
 
-  def predict(  # pytype: disable=signature-mismatch  # overriding-parameter-type-checks
-      self,
-      rng_key: hk.PRNGSequence,
-      features: _FeaturesChunked,
-      algorithm_index: Optional[int] = None):
+  def predict(self, rng_key: hk.PRNGSequence, features: _FeaturesChunked,
+              algorithm_index: Optional[int] = None):
     """Inference not implemented. Chunked model intended for training only."""
     raise NotImplementedError
 
   def _loss(self, params, rng_key, feedback, algorithm_index):
+    length_index, algorithm_index = algorithm_index
+    mp_state = self.mp_states[length_index][algorithm_index]
     ((output_preds, hint_preds, diff_logits, gt_diffs),
      mp_state) = self.net_fn_apply(params, rng_key, [feedback.features],
-                                   [self.mp_states[algorithm_index]],
+                                   [mp_state],
                                    repred=False,
                                    algorithm_index=algorithm_index)
 
@@ -430,26 +481,25 @@ class BaselineModelChunked(BaselineModel):
 
     return total_loss, (mp_state,)
 
-  def update(
+  def compute_grad(
       self,
       rng_key: hk.PRNGSequence,
-      params: hk.Params,
-      opt_state: optax.OptState,
       feedback: _Feedback,
-      algorithm_index: Optional[int] = None,
-  ) -> Tuple[hk.Params, optax.OptState, _Array]:
-    """Model update step."""
+      algorithm_index: Optional[Tuple[int, int]] = None,
+  ) -> Tuple[float, _Array]:
+    """Compute gradients."""
 
     if algorithm_index is None:
       assert len(self._spec) == 1
-      algorithm_index = 0
+      algorithm_index = (0, 0)
 
-    (lss, (self.mp_states[algorithm_index],)), grads = jax.value_and_grad(
-        self.jitted_loss, has_aux=True)(params, rng_key, feedback,
+    (lss, (mp_state,)), grads = jax.value_and_grad(
+        self.jitted_loss, has_aux=True)(self.params, rng_key, feedback,
                                         algorithm_index)
-    new_params, opt_state = self._update_params(params, grads, opt_state)
+    length_index, algorithm_index = algorithm_index
+    self.mp_states[length_index][algorithm_index] = mp_state
 
-    return new_params, opt_state, lss
+    return lss, grads
 
   def verbose_loss(self, *args, **kwargs):
     raise NotImplementedError
@@ -465,9 +515,15 @@ def _nb_nodes(feedback: _Feedback, is_chunked) -> int:
   assert False
 
 
-def _filter_processor(params: hk.Params) -> hk.Params:
+def _filter_out_processor(params: hk.Params) -> hk.Params:
   return hk.data_structures.filter(
-      lambda module_name, n, v: 'construct_processor' in module_name, params)
+      lambda module_name, n, v: processors.PROCESSOR_TAG not in module_name,
+      params)
+
+
+def _filter_in_processor(params: hk.Params) -> hk.Params:
+  return hk.data_structures.filter(
+      lambda module_name, n, v: processors.PROCESSOR_TAG in module_name, params)
 
 
 def _is_not_done_broadcast(lengths, i, tensor):
@@ -475,6 +531,26 @@ def _is_not_done_broadcast(lengths, i, tensor):
   while len(is_not_done.shape) < len(tensor.shape):
     is_not_done = jnp.expand_dims(is_not_done, -1)
   return is_not_done
+
+
+@functools.partial(jax.jit, static_argnames=['opt', 'freeze_processor'])
+def accum_opt_update(params, grads, opt_state, opt, freeze_processor):
+  """Update params from gradients collected from several algorithms."""
+  # Average the gradients over all algos
+  grads = jax.tree_util.tree_map(
+      lambda *x: sum(x) / (sum([jnp.any(k) for k in x]) + 1e-12), *grads)
+  updates, opt_state = opt.update(grads, opt_state)
+  if freeze_processor:
+    params_subset = _filter_out_processor(params)
+    assert len(params) > len(params_subset)
+    assert params_subset
+    updates_subset = _filter_out_processor(updates)
+    new_params = optax.apply_updates(params_subset, updates_subset)
+    new_params = hk.data_structures.merge(params, new_params)
+  else:
+    new_params = optax.apply_updates(params, updates)
+
+  return new_params, opt_state
 
 
 @functools.partial(jax.jit, static_argnames=['opt'])
@@ -497,7 +573,7 @@ def filter_null_grads(grads, opt, opt_state, opt_state_skeleton):
 
   Args:
     grads: Gradients for all parameters.
-    opt: Optax optmizier.
+    opt: Optax optimizer.
     opt_state: Optimizer state.
     opt_state_skeleton: A "skeleton" of optimizer state that has been
       initialized with scalar parameters. This serves to traverse each parameter
@@ -507,10 +583,10 @@ def filter_null_grads(grads, opt, opt_state, opt_state_skeleton):
       have not been taken into account.
   """
   # Ignore params with no gradient.
-  masked_grads = jax.tree_map(lambda x: x if jnp.abs(x).sum() > 0.0 else None,
-                              grads)
-  flat_grads, treedef = jax.tree_flatten(masked_grads)
-  flat_opt_state = jax.tree_map(
+  masked_grads = jax.tree_util.tree_map(lambda x: x if jnp.any(x) else None,
+                                        grads)
+  flat_grads, treedef = jax.tree_util.tree_flatten(masked_grads)
+  flat_opt_state = jax.tree_util.tree_map(
       lambda _, x: treedef.flatten_up_to(x) if not isinstance(x, _Array) else x,
       opt_state_skeleton, opt_state)
 
@@ -521,12 +597,13 @@ def filter_null_grads(grads, opt, opt_state, opt_state_skeleton):
     """Restore tree structure, filling missing (None) leaves with original."""
     if isinstance(flat, _Array):
       return flat
-    return jax.tree_map(lambda x, y: x if y is None else y,
-                        original, treedef.unflatten(flat))
+    return jax.tree_util.tree_map(lambda x, y: x if y is None else y, original,
+                                  treedef.unflatten(flat))
 
   # Restore the state and updates tree structure.
-  new_opt_state = jax.tree_map(
-      lambda _, x, y: unflatten(x, y),
-      opt_state_skeleton, flat_opt_state, opt_state)
-  updates = unflatten(flat_updates, jax.tree_map(lambda x: 0., grads))
+  new_opt_state = jax.tree_util.tree_map(lambda _, x, y: unflatten(x, y),
+                                         opt_state_skeleton, flat_opt_state,
+                                         opt_state)
+  updates = unflatten(flat_updates,
+                      jax.tree_util.tree_map(lambda x: 0., grads))
   return updates, new_opt_state
