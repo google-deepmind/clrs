@@ -53,6 +53,85 @@ _OutputClass = specs.OutputClass
 # pytype: disable=signature-mismatch
 
 
+def _maybe_pick_first_pmapped(tree):
+  if jax.local_device_count() == 1:
+    return tree
+  return jax.tree_util.tree_map(lambda x: x[0], tree)
+
+
+@jax.jit
+def _restack_from_pmap(tree):
+  """Stack the results of a pmapped computation across the first two axes."""
+  restack_array = lambda x: jnp.reshape(x, (-1,) + x.shape[2:])
+  return jax.tree_util.tree_map(restack_array, tree)
+
+
+def _maybe_restack_from_pmap(tree):
+  if jax.local_device_count() == 1:
+    return tree
+  return _restack_from_pmap(tree)
+
+
+@functools.partial(jax.jit, static_argnums=[1, 2])
+def _pmap_reshape(x, n_devices, split_axis=0):
+  """Splits a pytree over n_devices on axis split_axis for pmapping."""
+  def _reshape(arr):
+    new_shape = (arr.shape[:split_axis] +
+                 (n_devices, arr.shape[split_axis] // n_devices) +
+                 arr.shape[split_axis + 1:])
+    return jnp.moveaxis(jnp.reshape(arr, new_shape), split_axis, 0)
+  return jax.tree_util.tree_map(_reshape, x)
+
+
+def _maybe_pmap_reshape(x, split_axis=0):
+  n_devices = jax.local_device_count()
+  if n_devices == 1:
+    return x
+  return _pmap_reshape(x, n_devices, split_axis)
+
+
+@functools.partial(jax.jit, static_argnums=1)
+def _pmap_data(data: Union[_Feedback, _Features], n_devices: int):
+  """Replicate/split feedback or features for pmapping."""
+  if isinstance(data, _Feedback):
+    features = data.features
+  else:
+    features = data
+  pmap_data = features._replace(
+      inputs=_pmap_reshape(features.inputs, n_devices),
+      hints=_pmap_reshape(features.hints, n_devices, split_axis=1),
+      lengths=_pmap_reshape(features.lengths, n_devices),
+  )
+  if isinstance(data, _Feedback):
+    pmap_data = data._replace(
+        features=pmap_data,
+        outputs=_pmap_reshape(data.outputs, n_devices)
+    )
+  return pmap_data
+
+
+def _maybe_pmap_data(data: Union[_Feedback, _Features]):
+  n_devices = jax.local_device_count()
+  if n_devices == 1:
+    return data
+  return _pmap_data(data, n_devices)
+
+
+def _maybe_put_replicated(tree):
+  if jax.local_device_count() == 1:
+    return jax.device_put(tree)
+  else:
+    return jax.device_put_replicated(tree, jax.local_devices())
+
+
+def _maybe_pmap_rng_key(rng_key: _Array):
+  n_devices = jax.local_device_count()
+  if n_devices == 1:
+    return rng_key
+  pmap_rng_keys = jax.random.split(rng_key, n_devices)
+  return jax.device_put_sharded(list(pmap_rng_keys), jax.local_devices())
+
+
 class BaselineModel(model.Model):
   """Model implementation with selectable message passing algorithm."""
 
@@ -64,7 +143,6 @@ class BaselineModel(model.Model):
       hidden_dim: int = 32,
       encode_hints: bool = False,
       decode_hints: bool = True,
-      decode_diffs: bool = False,
       encoder_init: str = 'default',
       use_lstm: bool = False,
       learning_rate: float = 0.005,
@@ -96,7 +174,6 @@ class BaselineModel(model.Model):
         message-passing vectors.
       encode_hints: Whether to provide hints as model inputs.
       decode_hints: Whether to provide hints as model outputs.
-      decode_diffs: Whether to predict masks within the model.
       encoder_init: The initialiser type to use for the encoders.
       use_lstm: Whether to insert an LSTM after message passing.
       learning_rate: Learning rate for training.
@@ -133,7 +210,6 @@ class BaselineModel(model.Model):
     assert hint_repred_mode in ['soft', 'hard', 'hard_on_eval']
 
     self.decode_hints = decode_hints
-    self.decode_diffs = decode_diffs
     self.checkpoint_path = checkpoint_path
     self.name = name
     self._freeze_processor = freeze_processor
@@ -164,27 +240,38 @@ class BaselineModel(model.Model):
     self._create_net_fns(hidden_dim, encode_hints, processor_factory, use_lstm,
                          encoder_init, dropout_prob, hint_teacher_forcing,
                          hint_repred_mode)
-    self.params = None
-    self.opt_state = None
+    self._device_params = None
+    self._device_opt_state = None
     self.opt_state_skeleton = None
 
   def _create_net_fns(self, hidden_dim, encode_hints, processor_factory,
                       use_lstm, encoder_init, dropout_prob,
                       hint_teacher_forcing, hint_repred_mode):
     def _use_net(*args, **kwargs):
-      return nets.Net(self._spec, hidden_dim, encode_hints,
-                      self.decode_hints, self.decode_diffs,
+      return nets.Net(self._spec, hidden_dim, encode_hints, self.decode_hints,
                       processor_factory, use_lstm, encoder_init,
                       dropout_prob, hint_teacher_forcing,
                       hint_repred_mode,
                       self.nb_dims, self.nb_msg_passing_steps)(*args, **kwargs)
 
     self.net_fn = hk.transform(_use_net)
-    self.net_fn_apply = jax.jit(self.net_fn.apply,
-                                static_argnames=['repred', 'algorithm_index',
-                                                 'return_hints',
-                                                 'return_all_outputs'])
-    self.jitted_loss = jax.jit(self._loss, static_argnames=['algorithm_index'])
+    pmap_args = dict(axis_name='batch', devices=jax.local_devices())
+    n_devices = jax.local_device_count()
+    func, static_arg, extra_args = (
+        (jax.jit, 'static_argnums', {}) if n_devices == 1 else
+        (jax.pmap, 'static_broadcasted_argnums', pmap_args))
+    pmean = functools.partial(jax.lax.pmean, axis_name='batch')
+    self._maybe_pmean = pmean if n_devices > 1 else lambda x: x
+    extra_args[static_arg] = 3
+    self.jitted_grad = func(self._compute_grad, **extra_args)
+    extra_args[static_arg] = 4
+    self.jitted_feedback = func(self._feedback, donate_argnums=[0, 3],
+                                **extra_args)
+    extra_args[static_arg] = [3, 4, 5]
+    self.jitted_predict = func(self._predict, **extra_args)
+    extra_args[static_arg] = [3, 4]
+    self.jitted_accum_opt_update = func(accum_opt_update, donate_argnums=[0, 2],
+                                        **extra_args)
 
   def init(self, features: Union[_Features, List[_Features]], seed: _Seed):
     if not isinstance(features, list):
@@ -199,10 +286,91 @@ class BaselineModel(model.Model):
     # want to avoid updating the state of params of untrained algorithms.
     self.opt_state_skeleton = self.opt.init(jnp.zeros(1))
 
+  @property
+  def params(self):
+    if self._device_params is None:
+      return None
+    return jax.device_get(_maybe_pick_first_pmapped(self._device_params))
+
+  @params.setter
+  def params(self, params):
+    self._device_params = _maybe_put_replicated(params)
+
+  @property
+  def opt_state(self):
+    if self._device_opt_state is None:
+      return None
+    return jax.device_get(_maybe_pick_first_pmapped(self._device_opt_state))
+
+  @opt_state.setter
+  def opt_state(self, opt_state):
+    self._device_opt_state = _maybe_put_replicated(opt_state)
+
+  def _compute_grad(self, params, rng_key, feedback, algorithm_index):
+    lss, grads = jax.value_and_grad(self._loss)(
+        params, rng_key, feedback, algorithm_index)
+    return self._maybe_pmean(lss), self._maybe_pmean(grads)
+
+  def _feedback(self, params, rng_key, feedback, opt_state, algorithm_index):
+    lss, grads = jax.value_and_grad(self._loss)(
+        params, rng_key, feedback, algorithm_index)
+    grads = self._maybe_pmean(grads)
+    params, opt_state = self._update_params(params, grads, opt_state,
+                                            algorithm_index)
+    lss = self._maybe_pmean(lss)
+    return lss, params, opt_state
+
+  def _predict(self, params, rng_key: hk.PRNGSequence, features: _Features,
+               algorithm_index: int, return_hints: bool,
+               return_all_outputs: bool):
+    outs, hint_preds = self.net_fn.apply(
+        params, rng_key, [features],
+        repred=True, algorithm_index=algorithm_index,
+        return_hints=return_hints,
+        return_all_outputs=return_all_outputs)
+    outs = decoders.postprocess(self._spec[algorithm_index],
+                                outs,
+                                sinkhorn_temperature=0.1,
+                                sinkhorn_steps=50,
+                                hard=True,
+                                )
+    return outs, hint_preds
+
+  def compute_grad(
+      self,
+      rng_key: hk.PRNGSequence,
+      feedback: _Feedback,
+      algorithm_index: Optional[int] = None,
+  ) -> Tuple[float, _Array]:
+    """Compute gradients."""
+
+    if algorithm_index is None:
+      assert len(self._spec) == 1
+      algorithm_index = 0
+    assert algorithm_index >= 0
+
+    # Calculate gradients.
+    rng_keys = _maybe_pmap_rng_key(rng_key)
+    feedback = _maybe_pmap_data(feedback)
+    loss, grads = self.jitted_grad(
+        self._device_params, rng_keys, feedback, algorithm_index)
+    loss = _maybe_pick_first_pmapped(loss)
+    grads = _maybe_pick_first_pmapped(grads)
+
+    return  loss, grads
+
   def feedback(self, rng_key: hk.PRNGSequence, feedback: _Feedback,
                algorithm_index=None) -> float:
-    loss, grads = self.compute_grad(rng_key, feedback, algorithm_index)
-    self.update_model_params(grads)
+    if algorithm_index is None:
+      assert len(self._spec) == 1
+      algorithm_index = 0
+    # Calculate and apply gradients.
+    rng_keys = _maybe_pmap_rng_key(rng_key)
+    feedback = _maybe_pmap_data(feedback)
+    loss, self._device_params, self._device_opt_state = self.jitted_feedback(
+        self._device_params, rng_keys, feedback,
+        self._device_opt_state, algorithm_index)
+    loss = _maybe_pick_first_pmapped(loss)
     return loss
 
   def predict(self, rng_key: hk.PRNGSequence, features: _Features,
@@ -214,27 +382,23 @@ class BaselineModel(model.Model):
       assert len(self._spec) == 1
       algorithm_index = 0
 
-    outs, hint_preds, diff_logits, gt_diff = self.net_fn_apply(
-        self.params, rng_key, [features],
-        repred=True, algorithm_index=algorithm_index,
-        return_hints=return_hints,
-        return_all_outputs=return_all_outputs)
-    outs = decoders.postprocess(self._spec[algorithm_index],
-                                outs,
-                                sinkhorn_temperature=0.1,
-                                sinkhorn_steps=50,
-                                hard=True,
-                                )
-    return outs, (hint_preds, diff_logits, gt_diff)
+    rng_keys = _maybe_pmap_rng_key(rng_key)
+    features = _maybe_pmap_data(features)
+    return _maybe_restack_from_pmap(
+        self.jitted_predict(
+            self._device_params, rng_keys, features,
+            algorithm_index,
+            return_hints,
+            return_all_outputs))
 
   def _loss(self, params, rng_key, feedback, algorithm_index):
     """Calculates model loss f(feedback; params)."""
-    (output_preds, hint_preds, diff_logits,
-     gt_diffs) = self.net_fn_apply(params, rng_key, [feedback.features],
-                                   repred=False,
-                                   algorithm_index=algorithm_index,
-                                   return_hints=True,
-                                   return_all_outputs=False)
+    output_preds, hint_preds = self.net_fn.apply(
+        params, rng_key, [feedback.features],
+        repred=False,
+        algorithm_index=algorithm_index,
+        return_hints=True,
+        return_all_outputs=False)
 
     nb_nodes = _nb_nodes(feedback, is_chunked=False)
     lengths = feedback.features.lengths
@@ -248,51 +412,21 @@ class BaselineModel(model.Model):
           nb_nodes=nb_nodes,
       )
 
-    # Optionally accumulate diff losses.
-    if self.decode_diffs:
-      total_loss += losses.diff_loss(
-          diff_logits=diff_logits,
-          gt_diffs=gt_diffs,
-          lengths=lengths,
-      )
-
     # Optionally accumulate hint losses.
     if self.decode_hints:
       for truth in feedback.features.hints:
         total_loss += losses.hint_loss(
             truth=truth,
             preds=[x[truth.name] for x in hint_preds],
-            gt_diffs=gt_diffs,
             lengths=lengths,
             nb_nodes=nb_nodes,
-            decode_diffs=self.decode_diffs,
         )
 
     return total_loss
 
-  def compute_grad(
-      self,
-      rng_key: hk.PRNGSequence,
-      feedback: _Feedback,
-      algorithm_index: Optional[int] = None,
-  ) -> Tuple[float, _Array]:
-    """Compute gradients."""
-
-    if algorithm_index is None:
-      assert len(self._spec) == 1
-      algorithm_index = 0
-
-    # Calculate and apply gradients.
-    assert algorithm_index >= 0
-    lss, grads = jax.value_and_grad(self.jitted_loss)(self.params, rng_key,
-                                                      feedback,
-                                                      algorithm_index)
-
-    return  lss, grads
-
-  def _update_params(self, params, grads, opt_state):
+  def _update_params(self, params, grads, opt_state, algorithm_index):
     updates, opt_state = filter_null_grads(
-        grads, self.opt, opt_state, self.opt_state_skeleton)
+        grads, self.opt, opt_state, self.opt_state_skeleton, algorithm_index)
     if self._freeze_processor:
       params_subset = _filter_out_processor(params)
       updates_subset = _filter_out_processor(updates)
@@ -306,30 +440,18 @@ class BaselineModel(model.Model):
     return new_params, opt_state
 
   def update_model_params_accum(self, grads) -> None:
-    self.params, self.opt_state = accum_opt_update(
-        self.params, grads, self.opt_state, self.opt, self._freeze_processor)
-
-  def update_model_params(self, grads) -> None:
-    self.params, self.opt_state = self._update_params(self.params, grads,
-                                                      self.opt_state)
+    grads = _maybe_put_replicated(grads)
+    self._device_params, self._device_opt_state = self.jitted_accum_opt_update(
+        self._device_params, grads, self._device_opt_state, self.opt,
+        self._freeze_processor)
 
   def verbose_loss(self, feedback: _Feedback, extra_info) -> Dict[str, _Array]:
     """Gets verbose loss information."""
-    hint_preds, diff_logits, gt_diffs = extra_info
+    hint_preds = extra_info
 
     nb_nodes = _nb_nodes(feedback, is_chunked=False)
     lengths = feedback.features.lengths
     losses_ = {}
-
-    # Optionally accumulate diff losses.
-    if self.decode_diffs:
-      losses_.update(
-          losses.diff_loss(
-              diff_logits=diff_logits,
-              gt_diffs=gt_diffs,
-              lengths=lengths,
-              verbose=True,
-          ))
 
     # Optionally accumulate hint losses.
     if self.decode_hints:
@@ -338,10 +460,8 @@ class BaselineModel(model.Model):
             losses.hint_loss(
                 truth=truth,
                 preds=[x[truth.name] for x in hint_preds],
-                gt_diffs=gt_diffs,
                 lengths=lengths,
                 nb_nodes=nb_nodes,
-                decode_diffs=self.decode_diffs,
                 verbose=True,
             ))
 
@@ -381,24 +501,35 @@ class BaselineModelChunked(BaselineModel):
     `BaselineModel`.
   """
 
-  mp_states: List[nets.MessagePassingStateChunked]
+  mp_states: List[List[nets.MessagePassingStateChunked]]
+  init_mp_states: List[List[nets.MessagePassingStateChunked]]
 
   def _create_net_fns(self, hidden_dim, encode_hints, processor_factory,
                       use_lstm, encoder_init, dropout_prob,
                       hint_teacher_forcing, hint_repred_mode):
     def _use_net(*args, **kwargs):
       return nets.NetChunked(
-          self._spec, hidden_dim, encode_hints,
-          self.decode_hints, self.decode_diffs,
+          self._spec, hidden_dim, encode_hints, self.decode_hints,
           processor_factory, use_lstm, encoder_init, dropout_prob,
           hint_teacher_forcing, hint_repred_mode,
           self.nb_dims, self.nb_msg_passing_steps)(*args, **kwargs)
 
     self.net_fn = hk.transform(_use_net)
-    self.net_fn_apply = jax.jit(
-        functools.partial(self.net_fn.apply, init_mp_state=False),
-        static_argnames=['repred', 'algorithm_index'])
-    self.jitted_loss = jax.jit(self._loss, static_argnames=['algorithm_index'])
+    pmap_args = dict(axis_name='batch', devices=jax.local_devices())
+    n_devices = jax.local_device_count()
+    func, static_arg, extra_args = (
+        (jax.jit, 'static_argnums', {}) if n_devices == 1 else
+        (jax.pmap, 'static_broadcasted_argnums', pmap_args))
+    pmean = functools.partial(jax.lax.pmean, axis_name='batch')
+    self._maybe_pmean = pmean if n_devices > 1 else lambda x: x
+    extra_args[static_arg] = 4
+    self.jitted_grad = func(self._compute_grad, **extra_args)
+    extra_args[static_arg] = 5
+    self.jitted_feedback = func(self._feedback, donate_argnums=[0, 4],
+                                **extra_args)
+    extra_args[static_arg] = [3, 4]
+    self.jitted_accum_opt_update = func(accum_opt_update, donate_argnums=[0, 2],
+                                        **extra_args)
 
   def _init_mp_state(self, features_list: List[List[_FeaturesChunked]],
                      rng_key: _Array):
@@ -421,6 +552,7 @@ class BaselineModelChunked(BaselineModel):
            seed: _Seed):
     self.mp_states = self._init_mp_state(features,
                                          jax.random.PRNGKey(seed))
+    self.init_mp_states = [list(x) for x in self.mp_states]
     self.params = self.net_fn.init(
         jax.random.PRNGKey(seed), features[0], self.mp_states[0],
         True, init_mp_state=False, algorithm_index=-1)
@@ -434,14 +566,13 @@ class BaselineModelChunked(BaselineModel):
     """Inference not implemented. Chunked model intended for training only."""
     raise NotImplementedError
 
-  def _loss(self, params, rng_key, feedback, algorithm_index):
-    length_index, algorithm_index = algorithm_index
-    mp_state = self.mp_states[length_index][algorithm_index]
-    ((output_preds, hint_preds, diff_logits, gt_diffs),
-     mp_state) = self.net_fn_apply(params, rng_key, [feedback.features],
-                                   [mp_state],
-                                   repred=False,
-                                   algorithm_index=algorithm_index)
+  def _loss(self, params, rng_key, feedback, mp_state, algorithm_index):
+    (output_preds, hint_preds), mp_state = self.net_fn.apply(
+        params, rng_key, [feedback.features],
+        [mp_state],
+        repred=False,
+        init_mp_state=False,
+        algorithm_index=algorithm_index)
 
     nb_nodes = _nb_nodes(feedback, is_chunked=True)
 
@@ -458,28 +589,33 @@ class BaselineModelChunked(BaselineModel):
           nb_nodes=nb_nodes,
       )
 
-    # Optionally accumulate diff losses.
-    if self.decode_diffs:
-      total_loss += losses.diff_loss_chunked(
-          diff_logits=diff_logits,
-          gt_diffs=gt_diffs,
-          is_first=is_first,
-      )
-
     # Optionally accumulate hint losses.
     if self.decode_hints:
       for truth in feedback.features.hints:
         loss = losses.hint_loss_chunked(
             truth=truth,
             pred=hint_preds[truth.name],
-            gt_diffs=gt_diffs,
             is_first=is_first,
             nb_nodes=nb_nodes,
-            decode_diffs=self.decode_diffs,
         )
         total_loss += loss
 
     return total_loss, (mp_state,)
+
+  def _compute_grad(self, params, rng_key, feedback, mp_state, algorithm_index):
+    (lss, (mp_state,)), grads = jax.value_and_grad(self._loss, has_aux=True)(
+        params, rng_key, feedback, mp_state, algorithm_index)
+    return self._maybe_pmean(lss), mp_state, self._maybe_pmean(grads)
+
+  def _feedback(self, params, rng_key, feedback, mp_state, opt_state,
+                algorithm_index):
+    (lss, (mp_state,)), grads = jax.value_and_grad(self._loss, has_aux=True)(
+        params, rng_key, feedback, mp_state, algorithm_index)
+    grads = self._maybe_pmean(grads)
+    params, opt_state = self._update_params(params, grads, opt_state,
+                                            algorithm_index)
+    lss = self._maybe_pmean(lss)
+    return lss, params, opt_state, mp_state
 
   def compute_grad(
       self,
@@ -492,14 +628,44 @@ class BaselineModelChunked(BaselineModel):
     if algorithm_index is None:
       assert len(self._spec) == 1
       algorithm_index = (0, 0)
-
-    (lss, (mp_state,)), grads = jax.value_and_grad(
-        self.jitted_loss, has_aux=True)(self.params, rng_key, feedback,
-                                        algorithm_index)
     length_index, algorithm_index = algorithm_index
-    self.mp_states[length_index][algorithm_index] = mp_state
+    # Reusing init_mp_state improves performance.
+    # The next, commented out line, should be used for proper state keeping.
+    # mp_state = self.mp_states[length_index][algorithm_index]
+    mp_state = self.init_mp_states[length_index][algorithm_index]
+    rng_keys = _maybe_pmap_rng_key(rng_key)
+    feedback = _maybe_pmap_reshape(feedback, split_axis=1)
+    mp_state = _maybe_pmap_reshape(mp_state, split_axis=0)
 
-    return lss, grads
+    loss, mp_state, grads = self.jitted_grad(
+        self._device_params, rng_keys, feedback, mp_state, algorithm_index)
+    loss = _maybe_pick_first_pmapped(loss)
+    grads = _maybe_pick_first_pmapped(grads)
+    mp_state = _maybe_restack_from_pmap(mp_state)
+    self.mp_states[length_index][algorithm_index] = mp_state
+    return loss, grads
+
+  def feedback(self, rng_key: hk.PRNGSequence, feedback: _Feedback,
+               algorithm_index=None) -> float:
+    if algorithm_index is None:
+      assert len(self._spec) == 1
+      algorithm_index = (0, 0)
+    length_index, algorithm_index = algorithm_index
+    # Reusing init_mp_state improves performance.
+    # The next, commented out line, should be used for proper state keeping.
+    # mp_state = self.mp_states[length_index][algorithm_index]
+    mp_state = self.init_mp_states[length_index][algorithm_index]
+    rng_keys = _maybe_pmap_rng_key(rng_key)
+    feedback = _maybe_pmap_reshape(feedback, split_axis=1)
+    mp_state = _maybe_pmap_reshape(mp_state, split_axis=0)
+    loss, self._device_params, self._device_opt_state, mp_state = (
+        self.jitted_feedback(
+            self._device_params, rng_keys, feedback,
+            mp_state, self._device_opt_state, algorithm_index))
+    loss = _maybe_pick_first_pmapped(loss)
+    mp_state = _maybe_restack_from_pmap(mp_state)
+    self.mp_states[length_index][algorithm_index] = mp_state
+    return loss
 
   def verbose_loss(self, *args, **kwargs):
     raise NotImplementedError
@@ -515,15 +681,18 @@ def _nb_nodes(feedback: _Feedback, is_chunked) -> int:
   assert False
 
 
+def _param_in_processor(module_name):
+  return processors.PROCESSOR_TAG in module_name
+
+
 def _filter_out_processor(params: hk.Params) -> hk.Params:
   return hk.data_structures.filter(
-      lambda module_name, n, v: processors.PROCESSOR_TAG not in module_name,
-      params)
+      lambda module_name, n, v: not _param_in_processor(module_name), params)
 
 
 def _filter_in_processor(params: hk.Params) -> hk.Params:
   return hk.data_structures.filter(
-      lambda module_name, n, v: processors.PROCESSOR_TAG in module_name, params)
+      lambda module_name, n, v: _param_in_processor(module_name), params)
 
 
 def _is_not_done_broadcast(lengths, i, tensor):
@@ -533,7 +702,6 @@ def _is_not_done_broadcast(lengths, i, tensor):
   return is_not_done
 
 
-@functools.partial(jax.jit, static_argnames=['opt', 'freeze_processor'])
 def accum_opt_update(params, grads, opt_state, opt, freeze_processor):
   """Update params from gradients collected from several algorithms."""
   # Average the gradients over all algos
@@ -558,7 +726,7 @@ def opt_update(opt, flat_grads, flat_opt_state):
   return opt.update(flat_grads, flat_opt_state)
 
 
-def filter_null_grads(grads, opt, opt_state, opt_state_skeleton):
+def filter_null_grads(grads, opt, opt_state, opt_state_skeleton, algo_idx):
   """Compute updates ignoring params that have no gradients.
 
   This prevents untrained params (e.g., encoders/decoders for algorithms
@@ -578,17 +746,29 @@ def filter_null_grads(grads, opt, opt_state, opt_state_skeleton):
     opt_state_skeleton: A "skeleton" of optimizer state that has been
       initialized with scalar parameters. This serves to traverse each parameter
       of the otpimizer state during the opt state update.
+    algo_idx: Index of algorithm, to filter out unused encoders/decoders.
+      If None, no filtering happens.
   Returns:
     Updates and new optimizer state, where the parameters with null gradient
       have not been taken into account.
   """
-  # Ignore params with no gradient.
-  masked_grads = jax.tree_util.tree_map(lambda x: x if jnp.any(x) else None,
-                                        grads)
+  def _keep_in_algo(k, v):
+    """Ignore params of encoders/decoders irrelevant for this algo."""
+    # Note: in shared pointer decoder modes, we should exclude shared params
+    #       for algos that do not have pointer outputs.
+    if ((processors.PROCESSOR_TAG in k) or
+        (f'algo_{algo_idx}_' in k)):
+      return v
+    return jax.tree_util.tree_map(lambda x: None, v)
+
+  if algo_idx is None:
+    masked_grads = grads
+  else:
+    masked_grads = {k: _keep_in_algo(k, v) for k, v in grads.items()}
   flat_grads, treedef = jax.tree_util.tree_flatten(masked_grads)
   flat_opt_state = jax.tree_util.tree_map(
-      lambda _, x: treedef.flatten_up_to(x) if not isinstance(x, _Array) else x,
-      opt_state_skeleton, opt_state)
+      lambda _, x: treedef.flatten_up_to(x)  # pylint:disable=g-long-lambda
+      if not isinstance(x, _Array) else x, opt_state_skeleton, opt_state)
 
   # Compute updates only for the params with gradient.
   flat_updates, flat_opt_state = opt_update(opt, flat_grads, flat_opt_state)

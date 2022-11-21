@@ -25,7 +25,6 @@ from absl import flags
 from absl import logging
 import clrs
 import jax
-import jax.numpy as jnp
 import numpy as np
 import requests
 import tensorflow as tf
@@ -72,10 +71,8 @@ flags.DEFINE_float('hint_teacher_forcing', 0.0,
                    'Probability that ground-truth teacher hints are encoded '
                    'during training instead of predicted hints. Only '
                    'pertinent in encoded_decoded modes.')
-flags.DEFINE_enum('hint_mode', 'encoded_decoded_nodiff',
-                  ['encoded_decoded', 'decoded_only',
-                   'encoded_decoded_nodiff', 'decoded_only_nodiff',
-                   'none'],
+flags.DEFINE_enum('hint_mode', 'encoded_decoded',
+                  ['encoded_decoded', 'decoded_only', 'none'],
                   'How should hints be used? Note, each mode defines a '
                   'separate task, with various difficulties. `encoded_decoded` '
                   'requires the model to explicitly materialise hint sequences '
@@ -87,9 +84,7 @@ flags.DEFINE_enum('hint_mode', 'encoded_decoded_nodiff',
                   'note that we currently do not make any efforts to '
                   'counterbalance the various hint losses. Hence, for certain '
                   'tasks, the best performance will now be achievable with no '
-                  'hint usage at all (`none`). The `no_diff` variants '
-                  'try to predict all hint values instead of just the values '
-                  'that change from one timestep to the next.')
+                  'hint usage at all (`none`).')
 flags.DEFINE_enum('hint_repred_mode', 'soft', ['soft', 'hard', 'hard_on_eval'],
                   'How to process predicted hints when fed back as inputs.'
                   'In soft mode, we use softmaxes for categoricals, pointers '
@@ -172,7 +167,7 @@ def _maybe_download_dataset(dataset_path):
 
 
 def make_sampler(length: int,
-                 rng_key: Any,
+                 rng: Any,
                  algorithm: str,
                  split: str,
                  batch_size: int,
@@ -190,7 +185,7 @@ def make_sampler(length: int,
       A length of -1 will mean that the benchmark
       dataset (for the given split) is used. Positive sizes will instantiate
       samplers of the corresponding size.
-    rng_key: Random key for the samplers and pos randomization.
+    rng: Numpy random state.
     algorithm: The name of the algorithm to sample from.
     split: 'train', 'val' or 'test'.
     batch_size: Samples per batch.
@@ -206,7 +201,6 @@ def make_sampler(length: int,
     A sampler (iterator), the number of samples in the iterator (negative
     if infinite samples), and the spec.
   """
-  new_rng_key, rng_key = jax.random.split(rng_key)
   if length < 0:  # load from file
     dataset_folder = _maybe_download_dataset(FLAGS.dataset_path)
     sampler, num_samples, spec = clrs.create_dataset(folder=dataset_folder,
@@ -218,7 +212,7 @@ def make_sampler(length: int,
     num_samples = clrs.CLRS30[split]['num_samples'] * multiplier
     sampler, spec = clrs.build_sampler(
         algorithm,
-        seed=new_rng_key[0].item(),
+        seed=rng.randint(2**32),
         num_samples=num_samples,
         length=length,
         **sampler_kwargs,
@@ -226,7 +220,6 @@ def make_sampler(length: int,
     sampler = _iterate_sampler(sampler, batch_size)
 
   if randomize_pos:
-    rng = np.random.default_rng(np.asarray(rng_key))
     sampler = clrs.process_random_pos(sampler, rng)
   if enforce_pred_as_input and algorithm in PRED_AS_INPUT_ALGOS:
     spec, sampler = clrs.process_pred_as_input(spec, sampler)
@@ -236,13 +229,12 @@ def make_sampler(length: int,
   return sampler, num_samples, spec
 
 
-def make_multi_sampler(sizes, rng_key, **kwargs):
+def make_multi_sampler(sizes, rng, **kwargs):
   """Create a sampler with cycling sample sizes."""
   ss = []
   tot_samples = 0
   for length in sizes:
-    new_rng_key, rng_key = jax.random.split(rng_key)
-    sampler, num_samples, spec = make_sampler(length, new_rng_key, **kwargs)
+    sampler, num_samples, spec = make_sampler(length, rng, **kwargs)
     ss.append(sampler)
     tot_samples += num_samples
 
@@ -254,7 +246,7 @@ def make_multi_sampler(sizes, rng_key, **kwargs):
 
 
 def _concat(dps, axis):
-  return jax.tree_util.tree_map(lambda *x: jnp.concatenate(x, axis), *dps)
+  return jax.tree_util.tree_map(lambda *x: np.concatenate(x, axis), *dps)
 
 
 def collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
@@ -278,7 +270,7 @@ def collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
   return {k: unpack(v) for k, v in out.items()}
 
 
-def create_samplers(rng_key, train_lengths: List[int]):
+def create_samplers(rng, train_lengths: List[int]):
   """Create all the samplers."""
   train_samplers = []
   val_samplers = []
@@ -304,7 +296,6 @@ def create_samplers(rng_key, train_lengths: List[int]):
           train_lengths = train_lengths * len(train_lengths)
 
       logging.info('Creating samplers for algo %s', algorithm)
-      new_rng_key, rng_key = jax.random.split(rng_key)
 
       p = tuple([0.1 + 0.1 * i for i in range(9)])
       if p and algorithm in ['articulation_points', 'bridges',
@@ -319,13 +310,13 @@ def create_samplers(rng_key, train_lengths: List[int]):
 
       common_sampler_args = dict(
           algorithm=FLAGS.algorithms[algo_idx],
+          rng=rng,
           enforce_pred_as_input=FLAGS.enforce_pred_as_input,
           enforce_permutations=FLAGS.enforce_permutations,
           chunk_length=FLAGS.chunk_length,
           )
 
       train_args = dict(sizes=train_lengths,
-                        rng_key=new_rng_key,
                         split='train',
                         batch_size=FLAGS.batch_size,
                         multiplier=-1,
@@ -336,9 +327,7 @@ def create_samplers(rng_key, train_lengths: List[int]):
       train_sampler, _, spec = make_multi_sampler(**train_args)
 
       mult = clrs.CLRS_30_ALGS_SETTINGS[algorithm]['num_samples_multiplier']
-      new_rng_key, rng_key = jax.random.split(rng_key)
       val_args = dict(sizes=[-1],
-                      rng_key=new_rng_key,
                       split='val',
                       batch_size=32,
                       multiplier=mult,
@@ -348,9 +337,7 @@ def create_samplers(rng_key, train_lengths: List[int]):
                       **common_sampler_args)
       val_sampler, val_samples, spec = make_multi_sampler(**val_args)
 
-      new_rng_key, rng_key = jax.random.split(rng_key)
       test_args = dict(sizes=[-1],
-                       rng_key=new_rng_key,
                        split='test',
                        batch_size=32,
                        multiplier=2 * mult,
@@ -374,39 +361,28 @@ def create_samplers(rng_key, train_lengths: List[int]):
 
 
 def main(unused_argv):
-  if FLAGS.hint_mode == 'encoded_decoded_nodiff':
+  if FLAGS.hint_mode == 'encoded_decoded':
     encode_hints = True
     decode_hints = True
-    decode_diffs = False
-  elif FLAGS.hint_mode == 'decoded_only_nodiff':
-    encode_hints = False
-    decode_hints = True
-    decode_diffs = False
-  elif FLAGS.hint_mode == 'encoded_decoded':
-    encode_hints = True
-    decode_hints = True
-    decode_diffs = True
   elif FLAGS.hint_mode == 'decoded_only':
     encode_hints = False
     decode_hints = True
-    decode_diffs = True
   elif FLAGS.hint_mode == 'none':
     encode_hints = False
     decode_hints = False
-    decode_diffs = False
   else:
     raise ValueError('Hint mode not in {encoded_decoded, decoded_only, none}.')
 
   train_lengths = [int(x) for x in FLAGS.train_lengths]
 
-  rng_key = jax.random.PRNGKey(FLAGS.seed)
+  rng = np.random.RandomState(FLAGS.seed)
+  rng_key = jax.random.PRNGKey(rng.randint(2**32))
 
   # Create samplers
-  new_rng_key, rng_key = jax.random.split(rng_key)
   (train_samplers,
    val_samplers, val_sample_counts,
    test_samplers, test_sample_counts,
-   spec_list) = create_samplers(new_rng_key, train_lengths)
+   spec_list) = create_samplers(rng, train_lengths)
 
   processor_factory = clrs.get_processor_factory(
       FLAGS.processor_type,
@@ -419,7 +395,6 @@ def main(unused_argv):
       hidden_dim=FLAGS.hidden_size,
       encode_hints=encode_hints,
       decode_hints=decode_hints,
-      decode_diffs=decode_diffs,
       encoder_init=FLAGS.encoder_init,
       use_lstm=FLAGS.use_lstm,
       learning_rate=FLAGS.learning_rate,
@@ -489,7 +464,7 @@ def main(unused_argv):
       rng_key = new_rng_key
 
       if FLAGS.chunked_training:
-        examples_in_chunk = jnp.sum(feedback.features.is_last).item()
+        examples_in_chunk = np.sum(feedback.features.is_last).item()
       else:
         examples_in_chunk = len(feedback.features.lengths)
       current_train_items[algo_idx] += examples_in_chunk
@@ -500,11 +475,11 @@ def main(unused_argv):
 
     # Periodically evaluate model
     if step >= next_eval:
+      eval_model.params = train_model.params
       for algo_idx in range(len(train_samplers)):
         common_extras = {'examples_seen': current_train_items[algo_idx],
                          'step': step,
                          'algorithm': FLAGS.algorithms[algo_idx]}
-        eval_model.params = train_model.params
 
         # Validation info.
         new_rng_key, rng_key = jax.random.split(rng_key)

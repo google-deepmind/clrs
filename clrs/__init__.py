@@ -40,6 +40,7 @@ from clrs._src.samplers import process_pred_as_input
 from clrs._src.samplers import process_random_pos
 from clrs._src.samplers import Sampler
 from clrs._src.samplers import Trajectory
+from clrs._src.specs import ALGO_IDX_INPUT_NAME
 from clrs._src.specs import CLRS_30_ALGS_SETTINGS
 from clrs._src.specs import Location
 from clrs._src.specs import OutputClass
@@ -51,6 +52,7 @@ from clrs._src.specs import Type
 __version__ = "1.0.0"
 
 __all__ = (
+    "ALGO_IDX_INPUT_NAME",
     "build_sampler",
     "chunkify",
     "CLRS30",

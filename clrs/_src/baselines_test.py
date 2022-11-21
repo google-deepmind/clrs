@@ -112,12 +112,12 @@ class BaselinesTest(parameterized.TestCase):
       processor_factory = processors.get_processor_factory(
           'mpnn', use_ln=False, nb_triplet_fts=0)
       common_args = dict(processor_factory=processor_factory, hidden_dim=8,
-                         learning_rate=0.01, decode_diffs=True,
+                         learning_rate=0.01,
                          decode_hints=True, encode_hints=True)
 
       b_full = baselines.BaselineModel(
           spec, dummy_trajectory=full_batches[0], **common_args)
-      b_full.init(full_batches[0].features, seed=0)
+      b_full.init(full_batches[0].features, seed=42)
       full_params = b_full.params
       full_loss_0 = b_full.feedback(rng_key, full_batches[0])
       b_full.params = full_params
@@ -126,7 +126,7 @@ class BaselinesTest(parameterized.TestCase):
 
       b_chunked = baselines.BaselineModelChunked(
           spec, dummy_trajectory=chunked_batches[0], **common_args)
-      b_chunked.init([[chunked_batches[0].features]], seed=0)
+      b_chunked.init([[chunked_batches[0].features]], seed=42)
       chunked_params = b_chunked.params
       jax.tree_util.tree_map(np.testing.assert_array_equal, full_params,
                              chunked_params)
@@ -174,7 +174,7 @@ class BaselinesTest(parameterized.TestCase):
       processor_factory = processors.get_processor_factory(
           'mpnn', use_ln=False, nb_triplet_fts=0)
       common_args = dict(processor_factory=processor_factory, hidden_dim=8,
-                         learning_rate=0.01, decode_diffs=True,
+                         learning_rate=0.01,
                          decode_hints=True, encode_hints=True)
 
       b_single = baselines.BaselineModel(
@@ -243,39 +243,38 @@ class BaselinesTest(parameterized.TestCase):
       ds = [_make_iterable_sampler(algo, batch_size, length) for algo in algos]
     batches = [next(d) for d in ds]
 
-    with chex.fake_jit():  # jitting makes test longer
-      processor_factory = processors.get_processor_factory(
-          'mpnn', use_ln=False, nb_triplet_fts=0)
-      common_args = dict(processor_factory=processor_factory, hidden_dim=8,
-                         learning_rate=0.01, decode_diffs=True,
-                         decode_hints=True, encode_hints=True)
-      if is_chunked:
-        baseline = baselines.BaselineModelChunked(
-            spec, dummy_trajectory=batches, **common_args)
-        baseline.init([[f.features for f in batches]], seed=0)
-      else:
-        baseline = baselines.BaselineModel(
-            spec, dummy_trajectory=batches, **common_args)
-        baseline.init([f.features for f in batches], seed=0)
+    processor_factory = processors.get_processor_factory(
+        'mpnn', use_ln=False, nb_triplet_fts=0)
+    common_args = dict(processor_factory=processor_factory, hidden_dim=8,
+                       learning_rate=0.01,
+                       decode_hints=True, encode_hints=True)
+    if is_chunked:
+      baseline = baselines.BaselineModelChunked(
+          spec, dummy_trajectory=batches, **common_args)
+      baseline.init([[f.features for f in batches]], seed=0)
+    else:
+      baseline = baselines.BaselineModel(
+          spec, dummy_trajectory=batches, **common_args)
+      baseline.init([f.features for f in batches], seed=0)
 
-      # Find out what parameters change when we train each algorithm
-      def _change(x, y):
-        changes = {}
-        for module_name, params in x.items():
-          changes[module_name] = sum(
-              jax.tree_util.tree_map(
-                  lambda a, b: np.sum(np.abs(a-b)), params, y[module_name]
-                  ).values())
-        return changes
+    # Find out what parameters change when we train each algorithm
+    def _change(x, y):
+      changes = {}
+      for module_name, params in x.items():
+        changes[module_name] = sum(
+            jax.tree_util.tree_map(
+                lambda a, b: np.sum(np.abs(a-b)), params, y[module_name]
+                ).values())
+      return changes
 
-      param_changes = []
-      for algo_idx in range(len(algos)):
-        init_params = copy.deepcopy(baseline.params)
-        _ = baseline.feedback(
-            rng_key,
-            batches[algo_idx],
-            algorithm_index=(0, algo_idx) if is_chunked else algo_idx)
-        param_changes.append(_change(init_params, baseline.params))
+    param_changes = []
+    for algo_idx in range(len(algos)):
+      init_params = copy.deepcopy(baseline.params)
+      _ = baseline.feedback(
+          rng_key,
+          batches[algo_idx],
+          algorithm_index=(0, algo_idx) if is_chunked else algo_idx)
+      param_changes.append(_change(init_params, baseline.params))
 
     # Test that non-changing parameters correspond to encoders/decoders
     # associated with the non-trained algorithms

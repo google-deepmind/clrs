@@ -109,23 +109,7 @@ def _create_data(algo, nb_nodes):
       _make_iterable_sampler(algo, batch_size, nb_nodes),
       chunk_length)
   chunk_sample = next(chunked_ds)
-
-  gt_diffs = {
-      _Location.NODE: _rand_mask(0, (chunk_length, batch_size,
-                                     nb_nodes)),
-      _Location.EDGE: _rand_mask(1, (chunk_length, batch_size,
-                                     nb_nodes, nb_nodes)),
-      _Location.GRAPH: _rand_mask(2, (chunk_length, batch_size)),
-  }
-  diff_logits = {
-      _Location.NODE: _rand_diff(3, (chunk_length, batch_size,
-                                     nb_nodes)),
-      _Location.EDGE: _rand_diff(4, (chunk_length, batch_size,
-                                     nb_nodes, nb_nodes)),
-      _Location.GRAPH: _rand_diff(5, (chunk_length, batch_size)),
-  }
-
-  return full_sample, chunk_sample, gt_diffs, diff_logits
+  return full_sample, chunk_sample
 
 
 class FullVsChunkLossesTest(parameterized.TestCase):
@@ -135,7 +119,7 @@ class FullVsChunkLossesTest(parameterized.TestCase):
   @parameterized.parameters('dfs', 'floyd_warshall')
   def test_output_loss(self, algo):
     nb_nodes = 16
-    full_sample, chunk_sample, _, _ = _create_data(algo, nb_nodes)
+    full_sample, chunk_sample = _create_data(algo, nb_nodes)
 
     # Calculate output loss.
     for truth_full, truth_chunked in zip(full_sample.outputs,
@@ -154,52 +138,28 @@ class FullVsChunkLossesTest(parameterized.TestCase):
       np.testing.assert_allclose(chunk_output_loss, full_output_loss, rtol=1e-4)
 
   @parameterized.parameters('dfs', 'floyd_warshall')
-  def test_diff_loss(self, algo):
-    nb_nodes = 16
-    full_sample, chunk_sample, gt_diffs, diff_logits = _create_data(
-        algo, nb_nodes)
-    chunk_diff_loss = losses.diff_loss_chunked(
-        diff_logits=diff_logits,
-        gt_diffs=gt_diffs,
-        is_first=chunk_sample.features.is_first,
-    )
-    full_diff_loss = losses.diff_loss(
-        diff_logits=invert(diff_logits)[1:],
-        gt_diffs=invert(gt_diffs)[1:],
-        lengths=full_sample.features.lengths,
-    )
-    np.testing.assert_allclose(chunk_diff_loss, full_diff_loss, rtol=1e-4)
-
-  @parameterized.parameters('dfs', 'floyd_warshall')
   def test_hint_loss(self, algo):
     nb_nodes = 16
-    full_sample, chunk_sample, gt_diffs, unused_diff_logits = _create_data(
-        algo, nb_nodes)
-    for decode_diffs in [False, True]:
-      for truth_full, truth_chunked in zip(full_sample.features.hints,
-                                           chunk_sample.features.hints):
-        np.testing.assert_array_equal(truth_full.data, truth_chunked.data)
-        pred = _as_pred_data(truth_chunked, nb_nodes, 0, 1)
-        chunk_hint_loss = losses.hint_loss_chunked(
-            truth=_mask_datapoint(truth_chunked, seed=1, t_axis=0),
-            pred=pred,
-            gt_diffs=gt_diffs,
-            is_first=chunk_sample.features.is_first,
-            nb_nodes=nb_nodes,
-            decode_diffs=decode_diffs,
-        )
+    full_sample, chunk_sample = _create_data(algo, nb_nodes)
+    for truth_full, truth_chunked in zip(full_sample.features.hints,
+                                         chunk_sample.features.hints):
+      np.testing.assert_array_equal(truth_full.data, truth_chunked.data)
+      pred = _as_pred_data(truth_chunked, nb_nodes, 0, 1)
+      chunk_hint_loss = losses.hint_loss_chunked(
+          truth=_mask_datapoint(truth_chunked, seed=1, t_axis=0),
+          pred=pred,
+          is_first=chunk_sample.features.is_first,
+          nb_nodes=nb_nodes,
+      )
 
-        full_preds = pred[1:]
-        full_gt_diffs = invert(gt_diffs)[1:]
-        full_hint_loss = losses.hint_loss(
-            truth=_mask_datapoint(truth_full, 1, t_axis=0),
-            preds=full_preds,
-            gt_diffs=full_gt_diffs,
-            lengths=full_sample.features.lengths,
-            nb_nodes=nb_nodes,
-            decode_diffs=decode_diffs,
-        )
-        np.testing.assert_allclose(chunk_hint_loss, full_hint_loss, rtol=1e-4)
+      full_preds = pred[1:]
+      full_hint_loss = losses.hint_loss(
+          truth=_mask_datapoint(truth_full, 1, t_axis=0),
+          preds=full_preds,
+          lengths=full_sample.features.lengths,
+          nb_nodes=nb_nodes,
+      )
+      np.testing.assert_allclose(chunk_hint_loss, full_hint_loss, rtol=1e-4)
 
 
 if __name__ == '__main__':

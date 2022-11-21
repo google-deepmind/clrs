@@ -17,7 +17,7 @@
 
 import functools
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import chex
 
@@ -47,8 +47,6 @@ _Type = specs.Type
 @chex.dataclass
 class _MessagePassingScanState:
   hint_preds: chex.Array
-  diff_logits: chex.Array
-  gt_diffs: chex.Array
   output_preds: chex.Array
   hiddens: chex.Array
   lstm_state: Optional[hk.LSTMState]
@@ -57,8 +55,6 @@ class _MessagePassingScanState:
 @chex.dataclass
 class _MessagePassingOutputChunked:
   hint_preds: chex.Array
-  diff_logits: chex.Array
-  gt_diffs: chex.Array
   output_preds: chex.Array
 
 
@@ -81,7 +77,6 @@ class Net(hk.Module):
       hidden_dim: int,
       encode_hints: bool,
       decode_hints: bool,
-      decode_diffs: bool,
       processor_factory: processors.ProcessorFactory,
       use_lstm: bool,
       encoder_init: str,
@@ -102,7 +97,6 @@ class Net(hk.Module):
     self.hidden_dim = hidden_dim
     self.encode_hints = encode_hints
     self.decode_hints = decode_hints
-    self.decode_diffs = decode_diffs
     self.processor_factory = processor_factory
     self.nb_dims = nb_dims
     self.use_lstm = use_lstm
@@ -122,7 +116,6 @@ class Net(hk.Module):
                         spec: _Spec,
                         encs: Dict[str, List[hk.Module]],
                         decs: Dict[str, Tuple[hk.Module]],
-                        diff_decs: Dict[str, Any],
                         return_hints: bool,
                         return_all_outputs: bool
                         ):
@@ -169,29 +162,10 @@ class Net(hk.Module):
             probing.DataPoint(
                 name=hint.name, location=loc, type_=typ, data=hint_data))
 
-    gt_diffs = None
-    if hints[0].data.shape[0] > 1 and self.decode_diffs:
-      gt_diffs = {
-          _Location.NODE: jnp.zeros((batch_size, nb_nodes)),
-          _Location.EDGE: jnp.zeros((batch_size, nb_nodes, nb_nodes)),
-          _Location.GRAPH: jnp.zeros((batch_size))
-      }
-      for hint in hints:
-        hint_cur = jax.lax.dynamic_index_in_dim(hint.data, i, 0, keepdims=False)
-        hint_nxt = jax.lax.dynamic_index_in_dim(
-            hint.data, i+1, 0, keepdims=False)
-        if len(hint_cur.shape) == len(gt_diffs[hint.location].shape):
-          hint_cur = jnp.expand_dims(hint_cur, -1)
-          hint_nxt = jnp.expand_dims(hint_nxt, -1)
-        gt_diffs[hint.location] += jnp.any(hint_cur != hint_nxt, axis=-1)
-      for loc in [_Location.NODE, _Location.EDGE, _Location.GRAPH]:
-        gt_diffs[loc] = (gt_diffs[loc] > 0.0).astype(jnp.float32) * 1.0
-
-    (hiddens, output_preds_cand, hint_preds, diff_logits,
-     lstm_state) = self._one_step_pred(inputs, cur_hint, mp_state.hiddens,
-                                       batch_size, nb_nodes,
-                                       mp_state.lstm_state,
-                                       spec, encs, decs, diff_decs, repred)
+    hiddens, output_preds_cand, hint_preds, lstm_state = self._one_step_pred(
+        inputs, cur_hint, mp_state.hiddens,
+        batch_size, nb_nodes, mp_state.lstm_state,
+        spec, encs, decs, repred)
 
     if first_step:
       output_preds = output_preds_cand
@@ -203,33 +177,14 @@ class Net(hk.Module):
         output_preds[outp] = is_not_done * output_preds_cand[outp] + (
             1.0 - is_not_done) * mp_state.output_preds[outp]
 
-    if self.decode_diffs:
-      if self.decode_hints:
-        if hints[0].data.shape[0] == 1 or repred:
-          diff_preds = {}
-          for loc in [_Location.NODE, _Location.EDGE, _Location.GRAPH]:
-            diff_preds[loc] = (diff_logits[loc] > 0.0).astype(jnp.float32) * 1.0
-        else:
-          diff_preds = gt_diffs
-        for hint in hints:
-          prev_hint = (
-              hint.data[0]
-              if first_step else mp_state.hint_preds[hint.name])
-          if first_step and hint.type_ == _Type.POINTER:
-            prev_hint = hk.one_hot(prev_hint, nb_nodes)
-          cur_diffs = diff_preds[hint.location]
-          while len(prev_hint.shape) > len(cur_diffs.shape):
-            cur_diffs = jnp.expand_dims(cur_diffs, -1)
-          hint_preds[hint.name] = (
-              cur_diffs * hint_preds[hint.name] + (1.0 - cur_diffs) * prev_hint)
-
     new_mp_state = _MessagePassingScanState(
-        hint_preds=hint_preds, diff_logits=diff_logits, gt_diffs=gt_diffs,
-        output_preds=output_preds, hiddens=hiddens, lstm_state=lstm_state)
+        hint_preds=hint_preds,
+        output_preds=output_preds,
+        hiddens=hiddens,
+        lstm_state=lstm_state)
     # Save memory by not stacking unnecessary fields
     accum_mp_state = _MessagePassingScanState(
         hint_preds=hint_preds if return_hints else None,
-        diff_logits=diff_logits, gt_diffs=gt_diffs,
         output_preds=output_preds if return_all_outputs else None,
         hiddens=None, lstm_state=None)
 
@@ -249,9 +204,9 @@ class Net(hk.Module):
         The list should have either length 1, at train/evaluation time,
         or length equal to the number of algorithms this Net is meant to
         process, at initialization.
-      repred: False during training, when we have access to ground-truth hints
-        and diffs. True in validation/test mode, when we have to use our own
-        hint and diff predictions.
+      repred: False during training, when we have access to ground-truth hints.
+        True in validation/test mode, when we have to use our own
+        hint predictions.
       algorithm_index: Which algorithm is being processed. It can be -1 at
         initialisation (either because we are initialising the parameters of
         the module or because we are intialising the message-passing state),
@@ -266,8 +221,8 @@ class Net(hk.Module):
         just the last step's output.
 
     Returns:
-      A 4-tuple with (output predictions, hint predictions, diff logits,
-      ground-truth diffs) for the selected algorithm.
+      A 2-tuple with (output predictions, hint predictions)
+      for the selected algorithm.
     """
     if algorithm_index == -1:
       algorithm_indices = range(len(features_list))
@@ -275,8 +230,7 @@ class Net(hk.Module):
       algorithm_indices = [algorithm_index]
     assert len(algorithm_indices) == len(features_list)
 
-    (self.encoders, self.decoders,
-     self.diff_decoders) = self._construct_encoders_decoders()
+    self.encoders, self.decoders = self._construct_encoders_decoders()
     self.processor = self.processor_factory(self.hidden_dim)
 
     # Optionally construct LSTM.
@@ -308,8 +262,8 @@ class Net(hk.Module):
         lstm_state = None
 
       mp_state = _MessagePassingScanState(
-          hint_preds=None, diff_logits=None, gt_diffs=None,
-          output_preds=None, hiddens=hiddens, lstm_state=lstm_state)
+          hint_preds=None, output_preds=None,
+          hiddens=hiddens, lstm_state=lstm_state)
 
       # Do the first step outside of the scan because it has a different
       # computation graph.
@@ -323,7 +277,6 @@ class Net(hk.Module):
           spec=self.spec[algorithm_index],
           encs=self.encoders[algorithm_index],
           decs=self.decoders[algorithm_index],
-          diff_decs=self.diff_decoders[algorithm_index],
           return_hints=return_hints,
           return_all_outputs=return_all_outputs,
           )
@@ -349,7 +302,6 @@ class Net(hk.Module):
     # the output only matters when a single algorithm is processed; the case
     # `algorithm_index==-1` (meaning all algorithms should be processed)
     # is used only to init parameters.
-
     accum_mp_state = jax.tree_util.tree_map(
         lambda init, tail: jnp.concatenate([init[None], tail], axis=0),
         lean_mp_state, accum_mp_state)
@@ -365,16 +317,14 @@ class Net(hk.Module):
     else:
       output_preds = output_mp_state.output_preds
     hint_preds = invert(accum_mp_state.hint_preds)
-    diff_logits = invert(accum_mp_state.diff_logits)
-    gt_diffs = invert(accum_mp_state.gt_diffs)
 
-    return output_preds, hint_preds, diff_logits, gt_diffs
+    return output_preds, hint_preds
 
   def _construct_encoders_decoders(self):
     """Constructs encoders and decoders, separate for each algorithm."""
     encoders_ = []
     decoders_ = []
-    diff_decoders = []
+    enc_algo_idx = None
     for (algo_idx, spec) in enumerate(self.spec):
       enc = {}
       dec = {}
@@ -382,10 +332,16 @@ class Net(hk.Module):
         if stage == _Stage.INPUT or (
             stage == _Stage.HINT and self.encode_hints):
           # Build input encoders.
-          enc[name] = encoders.construct_encoders(
-              stage, loc, t, hidden_dim=self.hidden_dim,
-              init=self.encoder_init,
-              name=f'algo_{algo_idx}_{name}')
+          if name == specs.ALGO_IDX_INPUT_NAME:
+            if enc_algo_idx is None:
+              enc_algo_idx = [hk.Linear(self.hidden_dim,
+                                        name=f'{name}_enc_linear')]
+            enc[name] = enc_algo_idx
+          else:
+            enc[name] = encoders.construct_encoders(
+                stage, loc, t, hidden_dim=self.hidden_dim,
+                init=self.encoder_init,
+                name=f'algo_{algo_idx}_{name}')
 
         if stage == _Stage.OUTPUT or (
             stage == _Stage.HINT and self.decode_hints):
@@ -397,14 +353,7 @@ class Net(hk.Module):
       encoders_.append(enc)
       decoders_.append(dec)
 
-      if self.decode_diffs:
-        # Optionally build diff decoders.
-        diff_decoders.append(
-            decoders.construct_diff_decoders(name=f'algo_{algo_idx}'))
-      else:
-        diff_decoders.append({})
-
-    return encoders_, decoders_, diff_decoders
+    return encoders_, decoders_
 
   def _one_step_pred(
       self,
@@ -417,7 +366,6 @@ class Net(hk.Module):
       spec: _Spec,
       encs: Dict[str, List[hk.Module]],
       decs: Dict[str, Tuple[hk.Module]],
-      diff_decs: Dict[str, Any],
       repred: bool,
   ):
     """Generates one-step predictions."""
@@ -461,7 +409,8 @@ class Net(hk.Module):
           nb_nodes=nb_nodes,
       )
 
-    nxt_hidden = hk.dropout(hk.next_rng_key(), self._dropout_prob, nxt_hidden)
+    if not repred:      # dropout only on training
+      nxt_hidden = hk.dropout(hk.next_rng_key(), self._dropout_prob, nxt_hidden)
 
     if self.use_lstm:
       # lstm doesn't accept multiple batch dimensions (in our case, batch and
@@ -490,16 +439,7 @@ class Net(hk.Module):
         repred=repred,
     )
 
-    # Optionally decode diffs.
-    diff_preds = decoders.maybe_decode_diffs(
-        diff_decoders=diff_decs,
-        h_t=h_t,
-        edge_fts=edge_fts,
-        graph_fts=graph_fts,
-        decode_diffs=self.decode_diffs,
-    )
-
-    return nxt_hidden, output_preds, hint_preds, diff_preds, nxt_lstm_state
+    return nxt_hidden, output_preds, hint_preds, nxt_lstm_state
 
 
 class NetChunked(Net):
@@ -515,7 +455,6 @@ class NetChunked(Net):
                         spec: _Spec,
                         encs: Dict[str, List[hk.Module]],
                         decs: Dict[str, Tuple[hk.Module]],
-                        diff_decs: Dict[str, Any],
                         ):
     """Perform one message passing step.
 
@@ -531,9 +470,9 @@ class NetChunked(Net):
         the chunk (or the first step of the next chunk). Besides, the next
         timestep's hints are necessary to compute diffs when `decode_diffs`
         is True.
-      repred: False during training, when we have access to ground-truth hints
-        and diffs. True in validation/test mode, when we have to use our own
-        hint and diff predictions.
+      repred: False during training, when we have access to ground-truth hints.
+        True in validation/test mode, when we have to use our own
+        hint predictions.
       init_mp_state: Indicates if we are calling the method just to initialise
         the message-passing state, before the beginning of training or
         validation.
@@ -542,12 +481,9 @@ class NetChunked(Net):
       spec: The spec of the algorithm being processed.
       encs: encoders for the algorithm being processed.
       decs: decoders for the algorithm being processed.
-      diff_decs: diff decoders for the algorithm being processed.
     Returns:
       A 2-tuple with the next mp_state and an output consisting of
-      hint predictions, diff logits, ground-truth diffs, and output predictions.
-      The diffs are between the next-step data (provided in `xs`) and the
-      current-step data (provided in `mp_state`).
+      hint predictions and output predictions.
     """
     def _as_prediction_data(hint):
       if hint.type_ == _Type.POINTER:
@@ -596,23 +532,6 @@ class NetChunked(Net):
       else:
         hints_for_pred = hints
 
-    gt_diffs = None
-    if self.decode_diffs:
-      gt_diffs = {
-          _Location.NODE: jnp.zeros((batch_size, nb_nodes)),
-          _Location.EDGE: jnp.zeros((batch_size, nb_nodes, nb_nodes)),
-          _Location.GRAPH: jnp.zeros((batch_size))
-      }
-      for hint, nxt_hint in zip(hints, nxt_hints):
-        data = hint.data
-        nxt_data = nxt_hint.data
-        if len(nxt_data.shape) == len(gt_diffs[hint.location].shape):
-          data = jnp.expand_dims(data, -1)
-          nxt_data = jnp.expand_dims(nxt_data, -1)
-        gt_diffs[hint.location] += jnp.any(data != nxt_data, axis=-1)
-      for loc in [_Location.NODE, _Location.EDGE, _Location.GRAPH]:
-        gt_diffs[loc] = (gt_diffs[loc] > 0.0).astype(jnp.float32) * 1.0
-
     hiddens = jnp.where(is_first[..., None, None], 0.0, mp_state.hiddens)
     if self.use_lstm:
       lstm_state = jax.tree_util.tree_map(
@@ -620,34 +539,16 @@ class NetChunked(Net):
           mp_state.lstm_state)
     else:
       lstm_state = None
-    (hiddens, output_preds, hint_preds, diff_logits,
-     lstm_state) = self._one_step_pred(inputs, hints_for_pred, hiddens,
-                                       batch_size, nb_nodes, lstm_state,
-                                       spec, encs, decs, diff_decs, repred)
-
-    if self.decode_diffs and self.decode_hints:
-      # Only output a hint predicted for this step if a difference
-      # happened in the ground-truth hint - or, at test time, if a difference
-      # was predicted for the hint. Otherwise replace the predicted hint with
-      # the hint predicted at the previous step.
-      if repred:
-        diff_preds = jax.tree_util.tree_map(lambda x: x > 0.0, diff_logits)
-      else:
-        diff_preds = gt_diffs
-      for hint in hints:
-        hint_data = _as_prediction_data(hint)
-        prev_hint = jnp.where(_expand_to(is_first, hint_data),
-                              hint_data, prev_hint_preds[hint.name])
-        cur_diffs = _expand_to(diff_preds[hint.location], hint_data)
-        hint_preds[hint.name] = jnp.where(cur_diffs,
-                                          hint_preds[hint.name],
-                                          prev_hint)
+    hiddens, output_preds, hint_preds, lstm_state = self._one_step_pred(
+        inputs, hints_for_pred, hiddens,
+        batch_size, nb_nodes, lstm_state,
+        spec, encs, decs, repred)
 
     new_mp_state = MessagePassingStateChunked(
         hiddens=hiddens, lstm_state=lstm_state, hint_preds=hint_preds,
         inputs=nxt_inputs, hints=nxt_hints, is_first=nxt_is_first)
     mp_output = _MessagePassingOutputChunked(
-        hint_preds=hint_preds, diff_logits=diff_logits, gt_diffs=gt_diffs,
+        hint_preds=hint_preds,
         output_preds=output_preds)
     return new_mp_state, mp_output
 
@@ -671,9 +572,9 @@ class NetChunked(Net):
         hint prediction, hidden and lstm state from the end of the previous
         chunk, for one algorithm. The length of the list should be the same
         as the length of `features_list`.
-      repred: False during training, when we have access to ground-truth hints
-        and diffs. True in validation/test mode, when we have to use our own
-        hint and diff predictions.
+      repred: False during training, when we have access to ground-truth hints.
+        True in validation/test mode, when we have to use our own hint
+        predictions.
       init_mp_state: Indicates if we are calling the network just to initialise
         the message-passing state, before the beginning of training or
         validation. If True, `algorithm_index` (see below) must be -1 in order
@@ -690,16 +591,16 @@ class NetChunked(Net):
 
     Returns:
       A 2-tuple consisting of:
-      - A 4-tuple with (output predictions, hint predictions, diff logits,
-        ground-truth diffs) for the selected algorithm.
-        Each of these has chunk_length x batch_size x ...
-        data, where the first time slice contains outputs for the mp_state
+      - A 2-tuple with (output predictions, hint predictions)
+        for the selected algorithm. Each of these has
+        chunk_length x batch_size x ... data, where the first time
+        slice contains outputs for the mp_state
         that was passed as input, and the last time slice contains outputs
         for the next-to-last slice of the input features. The outputs that
         correspond to the final time slice of the input features will be
         calculated when the next chunk is processed, using the data in the
         mp_state returned here (see below). If `init_mp_state` is True,
-        we return None instead of the 4-tuple.
+        we return None instead of the 2-tuple.
       - The mp_state (message-passing state) for the next chunk of data
         of the selected algorithm. If `init_mp_state` is True, we return
         initial mp states for all the algorithms.
@@ -712,8 +613,7 @@ class NetChunked(Net):
     assert len(algorithm_indices) == len(features_list)
     assert len(algorithm_indices) == len(mp_state_list)
 
-    (self.encoders, self.decoders,
-     self.diff_decoders) = self._construct_encoders_decoders()
+    self.encoders, self.decoders = self._construct_encoders_decoders()
     self.processor = self.processor_factory(self.hidden_dim)
     # Optionally construct LSTM.
     if self.use_lstm:
@@ -755,7 +655,6 @@ class NetChunked(Net):
             spec=self.spec[algorithm_index],
             encs=self.encoders[algorithm_index],
             decs=self.decoders[algorithm_index],
-            diff_decs=self.diff_decoders[algorithm_index],
             )
         output_mp_states.append(mp_state)
       return None, output_mp_states
@@ -776,7 +675,6 @@ class NetChunked(Net):
           spec=self.spec[algorithm_index],
           encs=self.encoders[algorithm_index],
           decs=self.decoders[algorithm_index],
-          diff_decs=self.diff_decoders[algorithm_index],
           )
 
       mp_state, scan_output = hk.scan(
@@ -789,8 +687,7 @@ class NetChunked(Net):
     # the output only matters when a single algorithm is processed; the case
     # `algorithm_index==-1` (meaning all algorithms should be processed)
     # is used only to init parameters.
-    return (scan_output.output_preds, scan_output.hint_preds,
-            scan_output.diff_logits, scan_output.gt_diffs), mp_state
+    return (scan_output.output_preds, scan_output.hint_preds), mp_state
 
 
 def _data_dimensions(features: _Features) -> Tuple[int, int]:

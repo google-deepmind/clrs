@@ -98,6 +98,8 @@ CLRS_30_ALGS = [
 ]
 
 
+ALGO_IDX_INPUT_NAME = 'algo_idx'
+
 # Algorithms have varying numbers of signals they are evaluated on.
 # To compensate for that, we issue more samples for those who use a small
 # number of signals.

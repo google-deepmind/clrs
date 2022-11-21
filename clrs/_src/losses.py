@@ -115,56 +115,11 @@ def output_loss(truth: _DataPoint, pred: _Array, nb_nodes: int) -> float:
   return total_loss
 
 
-def diff_loss_chunked(diff_logits, gt_diffs, is_first):
-  """Diff loss for time-chunked training."""
-  total_loss = 0.
-  for loc in [_Location.NODE, _Location.EDGE, _Location.GRAPH]:
-    valid = (1 - _expand_and_broadcast_to(is_first, diff_logits[loc])).astype(
-        jnp.float32)
-    total_valid = jnp.maximum(jnp.sum(valid), EPS)
-    loss = (
-        jnp.maximum(diff_logits[loc], 0) -
-        diff_logits[loc] * gt_diffs[loc] +
-        jnp.log1p(jnp.exp(-jnp.abs(diff_logits[loc]))))
-    total_loss += jnp.sum(jnp.where(valid, loss, 0.0)) / total_valid
-  return total_loss
-
-
-def diff_loss(diff_logits, gt_diffs, lengths, verbose=False):
-  """Diff loss for full-sample training."""
-  total_loss = 0.
-  verbose_loss = dict()
-  length = len(gt_diffs)
-
-  for loc in [_Location.NODE, _Location.EDGE, _Location.GRAPH]:
-    for i in range(length):
-      loss = _diff_loss(loc, i, diff_logits, gt_diffs, lengths) / length
-      if verbose:
-        verbose_loss[loc + '_diff_%d' % i] = loss
-      else:
-        total_loss += loss
-
-  return verbose_loss if verbose else total_loss
-
-
-def _diff_loss(loc, i, diff_logits, gt_diffs, lengths) -> float:
-  """Full-sample diff loss helper."""
-  is_not_done = _is_not_done_broadcast(lengths, i, diff_logits[i][loc])
-  loss = (
-      jnp.maximum(diff_logits[i][loc], 0) -
-      diff_logits[i][loc] * gt_diffs[i][loc] +
-      jnp.log1p(jnp.exp(-jnp.abs(diff_logits[i][loc]))) * is_not_done)
-
-  return jnp.mean(loss)
-
-
 def hint_loss_chunked(
     truth: _DataPoint,
     pred: _Array,
-    gt_diffs: _PredTrajectory,
     is_first: _Array,
     nb_nodes: int,
-    decode_diffs: bool,
 ):
   """Hint loss for time-chunked training."""
   loss, mask = _hint_loss(
@@ -175,8 +130,6 @@ def hint_loss_chunked(
   )
 
   mask *= (1 - _expand_to(is_first, loss)).astype(jnp.float32)
-  if decode_diffs:
-    mask *= gt_diffs[truth.location]
   loss = jnp.sum(loss * mask) / jnp.maximum(jnp.sum(mask), EPS)
   return loss
 
@@ -184,10 +137,8 @@ def hint_loss_chunked(
 def hint_loss(
     truth: _DataPoint,
     preds: List[_Array],
-    gt_diffs: _PredTrajectories,
     lengths: _Array,
     nb_nodes: int,
-    decode_diffs: bool,
     verbose: bool = False,
 ):
   """Hint loss for full-sample training."""
@@ -202,8 +153,6 @@ def hint_loss(
       nb_nodes=nb_nodes,
   )
   mask *= _is_not_done_broadcast(lengths, jnp.arange(length)[:, None], loss)
-  if decode_diffs:
-    mask *= jnp.stack([g[truth.location] for g in gt_diffs])
   loss = jnp.sum(loss * mask) / jnp.maximum(jnp.sum(mask), EPS)
   if verbose:
     verbose_loss['loss_' + truth.name] = loss
