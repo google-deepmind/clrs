@@ -481,6 +481,12 @@ def main(unused_argv):
                          'step': step,
                          'algorithm': FLAGS.algorithms[algo_idx]}
 
+        # Validation loss.
+        feedback = feedback_list[algo_idx]
+        rng_key, new_rng_key = jax.random.split(rng_key)
+        val_loss = eval_model.feedback(rng_key, feedback, algo_idx)
+        rng_key = new_rng_key
+
         # Validation info.
         new_rng_key, rng_key = jax.random.split(rng_key)
         val_stats = collect_and_eval(
@@ -489,8 +495,9 @@ def main(unused_argv):
             val_sample_counts[algo_idx],
             new_rng_key,
             extras=common_extras)
-        logging.info('(val) algo %s step %d: %s',
-                     FLAGS.algorithms[algo_idx], step, val_stats)
+        logging.info('(val) algo %s step %d: loss=%f, %s',
+                     FLAGS.algorithms[algo_idx], step,
+                     val_loss, val_stats)
         val_scores[algo_idx] = val_stats['score']
 
       next_eval += FLAGS.eval_every
@@ -521,6 +528,13 @@ def main(unused_argv):
                      'step': step,
                      'algorithm': FLAGS.algorithms[algo_idx]}
 
+    # Test loss.
+    feedback = feedback_list[algo_idx]
+    rng_key, new_rng_key = jax.random.split(rng_key)
+    test_loss = eval_model.feedback(rng_key, feedback, algo_idx)
+    rng_key = new_rng_key
+
+    # Test info.
     new_rng_key, rng_key = jax.random.split(rng_key)
     test_stats = collect_and_eval(
         test_samplers[algo_idx],
@@ -528,7 +542,8 @@ def main(unused_argv):
         test_sample_counts[algo_idx],
         new_rng_key,
         extras=common_extras)
-    logging.info('(test) algo %s : %s', FLAGS.algorithms[algo_idx], test_stats)
+    logging.info('(test) algo %s : loss=%f, %s', FLAGS.algorithms[algo_idx],
+                 test_loss, test_stats)
 
   logging.info('Done!')
 
