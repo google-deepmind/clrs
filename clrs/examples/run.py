@@ -18,6 +18,7 @@
 import functools
 import os
 import shutil
+import csv
 from typing import Any, Dict, List
 
 from absl import app
@@ -373,6 +374,23 @@ def main(unused_argv):
   else:
     raise ValueError('Hint mode not in {encoded_decoded, decoded_only, none}.')
 
+  # TODO: filename based on experiment setup + filepath
+  csvfile = open('out.csv', 'w', newline='')
+  fieldnames = ["algorithm",
+                "train_loss",
+                "train_accuracy",
+                "learning_rate",
+                "len_train_ds",
+                "len_val_ds",
+                "batches_per_epoch",
+                "time_per_epoch",
+                "fwd_time_in_epoch",
+                "epoch",
+                "step",
+                "val_loss",
+                "val_accuracy"]
+  fwriter = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
   train_lengths = [int(x) for x in FLAGS.train_lengths]
 
   rng = np.random.RandomState(FLAGS.seed)
@@ -477,6 +495,15 @@ def main(unused_argv):
             logging.info('Algo %s epoch %i current loss %f, current lr %f, current_train_items %i.',
                          FLAGS.algorithms[algo_idx], epoch,
                          cur_loss, cur_lr, current_train_items[algo_idx])
+            # TODO: train_accuracy, len_train_ds, batches_per_epoch
+            # TODO: time_per_epoch, fwd_time_in_epoch
+            # TODO: step should be incremental instead of restart from 0?
+            fwriter.writerow({"algorithm": FLAGS.algorithms[algo_idx],
+                              "train_loss": cur_loss,
+                              "learning_rate": cur_lr,
+                              "epoch": epoch,
+                              "step": step
+                              })
 
       # Validation step at the last training step.
       if step == FLAGS.train_steps - 1:
@@ -504,6 +531,14 @@ def main(unused_argv):
           logging.info('(val) algo %s epoch %d: loss=%f, %s',
                        FLAGS.algorithms[algo_idx], epoch,
                        val_loss, val_stats)
+          # TODO: write to CSV (what to do with algo)
+          # TODO: len_val_ds
+          # TODO: time_per_epoch, fwd_time_in_epoch
+          fwriter.writerow({"algorithm": FLAGS.algorithms[algo_idx],
+                            "val_loss": cur_loss,
+                            "val_accuracy": val_stats['score'],  # TODO: double-check
+                            "epoch": epoch
+                            })
           val_scores[algo_idx] = val_stats['score']
 
         # If best total score, update best checkpoint.
@@ -552,6 +587,7 @@ def main(unused_argv):
                  test_loss, test_stats)
 
   logging.info('Done!')
+  csvfile.close()
 
 
 if __name__ == '__main__':
