@@ -55,9 +55,8 @@ flags.DEFINE_boolean('chunked_training', False,
 flags.DEFINE_integer('chunk_length', 16,
                      'Time chunk length used for training (if '
                      '`chunked_training` is True.')
-flags.DEFINE_integer('epochs', 10, 'Number of epochs for training.')
-flags.DEFINE_integer('train_steps', 10, 'Number of training iterations.')
-flags.DEFINE_integer('eval_every', 1, 'Evaluation frequency (in steps).')
+flags.DEFINE_integer('epochs', 3, 'Number of epochs for training.')
+flags.DEFINE_integer('train_steps', 5, 'Number of training iterations.')
 
 flags.DEFINE_integer('hidden_size', 128,
                      'Number of hidden units of the model.')
@@ -422,19 +421,16 @@ def main(unused_argv):
   else:
     train_model = eval_model
 
-  # Training loop.
-  best_score = -1.0
-  current_train_items = [0] * len(FLAGS.algorithms)
-  step = 0
-  next_eval = 0
-  # Make sure scores improve on first step, but not overcome best score
-  # until all algos have had at least one evaluation.
-  val_scores = [-99999.9] * len(FLAGS.algorithms)
-  length_idx = 0
   epoch = 0
-
   while epoch < FLAGS.epochs:
-    print("EPOCHS = ", FLAGS.epochs)
+    # Training loop.
+    best_score = -1.0
+    current_train_items = [0] * len(FLAGS.algorithms)
+    step = 0
+    # Make sure scores improve on first step, but not overcome best score
+    # until all algos have had at least one evaluation.
+    val_scores = [-99999.9] * len(FLAGS.algorithms)
+    length_idx = 0
     while step < FLAGS.train_steps:
       feedback_list = [next(t) for t in train_samplers]
 
@@ -491,6 +487,7 @@ def main(unused_argv):
                            'algorithm': FLAGS.algorithms[algo_idx]}
 
           # Validation loss.
+          feedback_list = [next(t) for t in val_samplers]
           feedback = feedback_list[algo_idx]
           rng_key, new_rng_key = jax.random.split(rng_key)
           val_loss, _ = eval_model.feedback(rng_key, feedback, algo_idx)
@@ -508,8 +505,6 @@ def main(unused_argv):
                        FLAGS.algorithms[algo_idx], epoch,
                        val_loss, val_stats)
           val_scores[algo_idx] = val_stats['score']
-
-        next_eval += FLAGS.eval_every
 
         # If best total score, update best checkpoint.
         # Also save a best checkpoint on the first step.
@@ -539,6 +534,7 @@ def main(unused_argv):
                      'algorithm': FLAGS.algorithms[algo_idx]}
 
     # Test loss.
+    feedback_list = [next(t) for t in test_samplers]
     feedback = feedback_list[algo_idx]
     rng_key, new_rng_key = jax.random.split(rng_key)
     test_loss, _ = eval_model.feedback(rng_key, feedback, algo_idx)
