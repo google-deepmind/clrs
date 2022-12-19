@@ -434,6 +434,7 @@ def main(unused_argv):
   epoch = 0
 
   while epoch < FLAGS.epochs:
+    print("EPOCHS = ", FLAGS.epochs)
     while step < FLAGS.train_steps:
       feedback_list = [next(t) for t in train_samplers]
 
@@ -492,7 +493,7 @@ def main(unused_argv):
           # Validation loss.
           feedback = feedback_list[algo_idx]
           rng_key, new_rng_key = jax.random.split(rng_key)
-          val_loss = eval_model.feedback(rng_key, feedback, algo_idx)
+          val_loss, _ = eval_model.feedback(rng_key, feedback, algo_idx)
           rng_key = new_rng_key
 
           # Validation info.
@@ -540,7 +541,7 @@ def main(unused_argv):
     # Test loss.
     feedback = feedback_list[algo_idx]
     rng_key, new_rng_key = jax.random.split(rng_key)
-    test_loss = eval_model.feedback(rng_key, feedback, algo_idx)
+    test_loss, _ = eval_model.feedback(rng_key, feedback, algo_idx)
     rng_key = new_rng_key
 
     # Test info.
