@@ -53,6 +53,19 @@ _OutputClass = specs.OutputClass
 # pytype: disable=signature-mismatch
 
 
+@optax.inject_hyperparams
+def optimizer_chain(learning_rate, grad_clip_max_norm):
+    optax_chain = [optax.clip_by_global_norm(grad_clip_max_norm),
+                   optax.scale_by_adam(),
+                   optax.scale(-learning_rate)]
+    return optax.chain(*optax_chain)
+
+
+@optax.inject_hyperparams
+def optimizer_adam(learning_rate):
+    return optax.adam(learning_rate)
+
+
 def _maybe_pick_first_pmapped(tree):
   if jax.local_device_count() == 1:
     return tree
@@ -214,12 +227,9 @@ class BaselineModel(model.Model):
     self.name = name
     self._freeze_processor = freeze_processor
     if grad_clip_max_norm != 0.0:
-      optax_chain = [optax.clip_by_global_norm(grad_clip_max_norm),
-                     optax.scale_by_adam(),
-                     optax.scale(-learning_rate)]
-      self.opt = optax.chain(*optax_chain)
+      self.opt = optimizer_chain(learning_rate, grad_clip_max_norm)
     else:
-      self.opt = optax.adam(learning_rate)
+      self.opt = optimizer_adam(learning_rate)
 
     self.nb_msg_passing_steps = nb_msg_passing_steps
 
@@ -370,8 +380,9 @@ class BaselineModel(model.Model):
     loss, self._device_params, self._device_opt_state = self.jitted_feedback(
         self._device_params, rng_keys, feedback,
         self._device_opt_state, algorithm_index)
+    lr = self._device_opt_state.hyperparams['learning_rate']
     loss = _maybe_pick_first_pmapped(loss)
-    return loss
+    return loss, lr
 
   def predict(self, rng_key: hk.PRNGSequence, features: _Features,
               algorithm_index: Optional[int] = None,
@@ -663,9 +674,10 @@ class BaselineModelChunked(BaselineModel):
             self._device_params, rng_keys, feedback,
             mp_state, self._device_opt_state, algorithm_index))
     loss = _maybe_pick_first_pmapped(loss)
+    lr = self._device_opt_state.hyperparams['learning_rate']
     mp_state = _maybe_restack_from_pmap(mp_state)
     self.mp_states[length_index][algorithm_index] = mp_state
-    return loss
+    return loss, lr
 
   def verbose_loss(self, *args, **kwargs):
     raise NotImplementedError

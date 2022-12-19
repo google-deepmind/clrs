@@ -460,7 +460,7 @@ def main(unused_argv):
         # In non-chunked training, all training lengths can be treated equally,
         # since there is no state to maintain between batches.
         length_and_algo_idx = algo_idx
-      cur_loss = train_model.feedback(rng_key, feedback, length_and_algo_idx)
+      cur_loss, cur_lr = train_model.feedback(rng_key, feedback, length_and_algo_idx)
       rng_key = new_rng_key
 
       if FLAGS.chunked_training:
@@ -469,9 +469,9 @@ def main(unused_argv):
         examples_in_chunk = len(feedback.features.lengths)
       current_train_items[algo_idx] += examples_in_chunk
       # to compare results with the standard 32-batch_size experiments
-      logging.info('Algo %s step %i current loss %f, current_train_items %i.',
+      logging.info('Algo %s step %i current loss %f, current lr %f, current_train_items %i.',
                    FLAGS.algorithms[algo_idx], step,
-                   cur_loss, current_train_items[algo_idx])
+                   cur_loss, cur_lr, current_train_items[algo_idx])
 
     # Periodically evaluate model
     if step >= next_eval:
