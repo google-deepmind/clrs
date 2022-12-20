@@ -19,6 +19,7 @@ import functools
 import os
 import shutil
 import csv
+import time
 from typing import Any, Dict, List
 
 from absl import app
@@ -452,6 +453,7 @@ def main(unused_argv):
   length_idx = 0
 
   while epoch < FLAGS.epochs:
+    time_per_epoch = 0
     while step < epoch*FLAGS.train_steps + FLAGS.train_steps:
       # TODO: maybe reuse same input data each epoch instead of random sampling (saving it in memory might be costly)
       feedback_list = [next(t) for t in train_samplers]
@@ -482,7 +484,12 @@ def main(unused_argv):
           # In non-chunked training, all training lengths can be treated equally,
           # since there is no state to maintain between batches.
           length_and_algo_idx = algo_idx
+    
+        start_time = time.time()
         cur_loss, cur_lr = train_model.feedback(rng_key, feedback, length_and_algo_idx)
+        time_per_step = time.time() - start_time
+        time_per_epoch += time_per_step
+
         rng_key = new_rng_key
 
         if FLAGS.chunked_training:
@@ -491,19 +498,23 @@ def main(unused_argv):
           examples_in_chunk = len(feedback.features.lengths)
         current_train_items[algo_idx] += examples_in_chunk
         # to compare results with the standard 32-batch_size experiments
-        logging.info('Algo %s step %i current loss %f, current lr %f, current_train_items %i.',
+        logging.info('Algo %s step %i current loss %f, current lr %f, current_train_items %i, time_per_step %f.',
                      FLAGS.algorithms[algo_idx], step,
-                     cur_loss, cur_lr, current_train_items[algo_idx])
+                     cur_loss, cur_lr, current_train_items[algo_idx],
+                     time_per_step)
         # log at the last training step of each epoch.
         if step == epoch*FLAGS.train_steps + FLAGS.train_steps - 1:
-            logging.info('Algo %s epoch %i current loss %f, current lr %f, current_train_items %i.',
+            logging.info('Algo %s epoch %i current loss %f, current lr %f, current_train_items %i, time_per_epoch %f.',
                          FLAGS.algorithms[algo_idx], epoch,
-                         cur_loss, cur_lr, current_train_items[algo_idx])
-            # TODO: train_accuracy, len_train_ds, batches_per_epoch
-            # TODO: time_per_epoch, fwd_time_in_epoch
+                         cur_loss, cur_lr, current_train_items[algo_idx],
+                         time_per_epoch)
+            # TODO: train_accuracy, len_train_ds
+            # TODO: fwd_time_in_epoch
             fwriter.writerow({"algorithm": FLAGS.algorithms[algo_idx],
                               "train_loss": cur_loss,
                               "learning_rate": cur_lr,
+                              "batches_per_epoch": FLAGS.train_steps,
+                              "time_per_epoch": time_per_epoch,
                               "epoch": epoch,
                               "step": step
                               })
@@ -536,10 +547,11 @@ def main(unused_argv):
                        val_loss, val_stats)
           # TODO: write to CSV (what to do with algo)
           # TODO: len_val_ds
-          # TODO: time_per_epoch, fwd_time_in_epoch
+          # TODO: fwd_time_in_epoch
           fwriter.writerow({"algorithm": FLAGS.algorithms[algo_idx],
                             "val_loss": val_loss,
                             "val_accuracy": val_stats['score'],  # TODO: double-check
+                            "time_per_epoch": time_per_epoch,
                             "epoch": epoch
                             })
           val_scores[algo_idx] = val_stats['score']
