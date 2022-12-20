@@ -57,7 +57,7 @@ flags.DEFINE_integer('chunk_length', 16,
                      'Time chunk length used for training (if '
                      '`chunked_training` is True.')
 flags.DEFINE_integer('epochs', 3, 'Number of epochs for training.')
-flags.DEFINE_integer('train_steps', 5, 'Number of training iterations.')
+flags.DEFINE_integer('train_steps', 5, 'Number of training iterations per epoch.')
 
 flags.DEFINE_integer('hidden_size', 128,
                      'Number of hidden units of the model.')
@@ -439,17 +439,21 @@ def main(unused_argv):
   else:
     train_model = eval_model
 
+
+  # Training loop.
+  best_score = -1.0
+  current_train_items = [0] * len(FLAGS.algorithms)
+  step = 0
   epoch = 0
+
+  # Make sure scores improve on first step, but not overcome best score
+  # until all algos have had at least one evaluation.
+  val_scores = [-99999.9] * len(FLAGS.algorithms)
+  length_idx = 0
+
   while epoch < FLAGS.epochs:
-    # Training loop.
-    best_score = -1.0
-    current_train_items = [0] * len(FLAGS.algorithms)
-    step = 0
-    # Make sure scores improve on first step, but not overcome best score
-    # until all algos have had at least one evaluation.
-    val_scores = [-99999.9] * len(FLAGS.algorithms)
-    length_idx = 0
-    while step < FLAGS.train_steps:
+    while step < epoch*FLAGS.train_steps + FLAGS.train_steps:
+      # TODO: maybe reuse same input data each epoch instead of random sampling (saving it in memory might be costly)
       feedback_list = [next(t) for t in train_samplers]
 
       # Initialize model.
@@ -490,14 +494,13 @@ def main(unused_argv):
         logging.info('Algo %s step %i current loss %f, current lr %f, current_train_items %i.',
                      FLAGS.algorithms[algo_idx], step,
                      cur_loss, cur_lr, current_train_items[algo_idx])
-        # log at the last training step.
-        if step == FLAGS.train_steps - 1:
+        # log at the last training step of each epoch.
+        if step == epoch*FLAGS.train_steps + FLAGS.train_steps - 1:
             logging.info('Algo %s epoch %i current loss %f, current lr %f, current_train_items %i.',
                          FLAGS.algorithms[algo_idx], epoch,
                          cur_loss, cur_lr, current_train_items[algo_idx])
             # TODO: train_accuracy, len_train_ds, batches_per_epoch
             # TODO: time_per_epoch, fwd_time_in_epoch
-            # TODO: step should be incremental instead of restart from 0?
             fwriter.writerow({"algorithm": FLAGS.algorithms[algo_idx],
                               "train_loss": cur_loss,
                               "learning_rate": cur_lr,
@@ -505,8 +508,8 @@ def main(unused_argv):
                               "step": step
                               })
 
-      # Validation step at the last training step.
-      if step == FLAGS.train_steps - 1:
+      # Validation step at the last training step of ech epoch.
+      if step == epoch*FLAGS.train_steps + FLAGS.train_steps - 1:
         eval_model.params = train_model.params
         for algo_idx in range(len(train_samplers)):
           common_extras = {'examples_seen': current_train_items[algo_idx],
@@ -535,7 +538,7 @@ def main(unused_argv):
           # TODO: len_val_ds
           # TODO: time_per_epoch, fwd_time_in_epoch
           fwriter.writerow({"algorithm": FLAGS.algorithms[algo_idx],
-                            "val_loss": cur_loss,
+                            "val_loss": val_loss,
                             "val_accuracy": val_stats['score'],  # TODO: double-check
                             "epoch": epoch
                             })
