@@ -508,7 +508,7 @@ def main(unused_argv):
                          FLAGS.algorithms[algo_idx], epoch,
                          cur_loss, cur_lr, current_train_items[algo_idx],
                          time_per_epoch)
-            # TODO: train_accuracy, len_train_ds
+            # TODO: train_accuracy, len_train_ds = batch size for each iteration, cummulated in current_train_items?
             # TODO: fwd_time_in_epoch
             fwriter.writerow({"algorithm": FLAGS.algorithms[algo_idx],
                               "train_loss": cur_loss,
@@ -546,7 +546,7 @@ def main(unused_argv):
                        FLAGS.algorithms[algo_idx], epoch,
                        val_loss, val_stats)
           # TODO: write to CSV (what to do with algo)
-          # TODO: len_val_ds
+          # TODO: len_val_ds - equal to batch size?
           # TODO: fwd_time_in_epoch
           fwriter.writerow({"algorithm": FLAGS.algorithms[algo_idx],
                             "val_loss": val_loss,
