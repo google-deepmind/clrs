@@ -112,8 +112,8 @@ flags.DEFINE_enum('processor_type', 'triplet_mpnn',
                    'gpgn', 'gpgn_mask', 'gmpnn',
                    'triplet_gpgn', 'triplet_gpgn_mask', 'triplet_gmpnn'],
                   'Processor type to use as the network P.')
-
-flags.DEFINE_string('checkpoint_path', '/tmp/CLRS30',
+# Old checkpoint location /tmp/CLRS30
+flags.DEFINE_string('checkpoint_path', './checkpoints',
                     'Path in which checkpoints are saved.')
 flags.DEFINE_string('dataset_path', '/tmp/CLRS30',
                     'Path in which dataset is stored.')
@@ -509,7 +509,6 @@ def main(unused_argv):
                          cur_loss, cur_lr, current_train_items[algo_idx],
                          time_per_epoch)
             # TODO: train_accuracy, len_train_ds = batch size for each iteration, cummulated in current_train_items?
-            # TODO: fwd_time_in_epoch
             fwriter.writerow({"algorithm": FLAGS.algorithms[algo_idx],
                               "train_loss": cur_loss,
                               "learning_rate": cur_lr,
@@ -519,7 +518,7 @@ def main(unused_argv):
                               "step": step
                               })
 
-      # Validation step at the last training step of ech epoch.
+      # Validation step at the last training step of each epoch.
       if step == epoch*FLAGS.train_steps + FLAGS.train_steps - 1:
         eval_model.params = train_model.params
         for algo_idx in range(len(train_samplers)):
@@ -547,7 +546,6 @@ def main(unused_argv):
                        val_loss, val_stats)
           # TODO: write to CSV (what to do with algo)
           # TODO: len_val_ds - equal to batch size?
-          # TODO: fwd_time_in_epoch
           fwriter.writerow({"algorithm": FLAGS.algorithms[algo_idx],
                             "val_loss": val_loss,
                             "val_accuracy": val_stats['score'],  # TODO: double-check
@@ -555,6 +553,11 @@ def main(unused_argv):
                             "epoch": epoch
                             })
           val_scores[algo_idx] = val_stats['score']
+
+          logging.info('Checkpointing algorithm %s for epoch %d', FLAGS.algorithms[algo_idx], epoch)
+          checkpoint_name = FLAGS.algorithms[algo_idx] + '_epoch_' + str(epoch) + '.pkl' 
+          train_model.save_model(checkpoint_name)
+
 
         # If best total score, update best checkpoint.
         # Also save a best checkpoint on the first step.
