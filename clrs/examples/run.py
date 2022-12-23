@@ -261,7 +261,7 @@ def _nb_nodes(feedback: clrs.Feedback, is_chunked) -> int:
   assert False
 
 
-def collect_and_eval(sampler, model, algo_idx, sample_count, rng_key, extras):
+def collect_and_eval(sampler, model, algo_idx, sample_count, rng_key, decode_hints, extras):
   """Collect batches of output and hint preds and evaluate them."""
   processed_samples = 0
   preds = []
@@ -273,7 +273,7 @@ def collect_and_eval(sampler, model, algo_idx, sample_count, rng_key, extras):
     batch_size = feedback.outputs[0].data.shape[0]
     outputs.append(feedback.outputs)
     new_rng_key, rng_key = jax.random.split(rng_key)
-    cur_preds, cur_outs, _ = model.predict(new_rng_key, feedback.features, algo_idx)
+    cur_preds, cur_outs, hint_preds = model.predict(new_rng_key, feedback.features, algo_idx, return_hints=True)
     preds.append(cur_preds)
 
     nb_nodes = _nb_nodes(feedback, is_chunked=False)
@@ -283,6 +283,17 @@ def collect_and_eval(sampler, model, algo_idx, sample_count, rng_key, extras):
             pred=cur_outs[truth.name],
             nb_nodes=nb_nodes,
         )
+
+    # Optionally accumulate hint losses.
+    if decode_hints:
+        lengths = feedback.features.lengths
+        for truth in feedback.features.hints:
+            total_loss += clrs.hint_loss(
+                truth=truth,
+                preds=[x[truth.name] for x in hint_preds],
+                lengths=lengths,
+                nb_nodes=nb_nodes,
+            )
 
     processed_samples += batch_size
   outputs = _concat(outputs, axis=0)
@@ -568,6 +579,7 @@ def main(unused_argv):
               # functools.partial(eval_model.predict, algorithm_index=algo_idx),
               val_sample_counts[algo_idx],
               new_rng_key,
+              decode_hints,
               extras=common_extras)
           logging.info('(val) algo %s epoch %d: loss=%f, %s',
                        FLAGS.algorithms[algo_idx], epoch,
@@ -623,6 +635,7 @@ def main(unused_argv):
         algo_idx,
         test_sample_counts[algo_idx],
         new_rng_key,
+        decode_hints,
         extras=common_extras)
     logging.info('(test) algo %s : loss=%f, %s', FLAGS.algorithms[algo_idx],
                  test_loss, test_stats)
@@ -632,5 +645,5 @@ def main(unused_argv):
 
 
 if __name__ == '__main__':
-  # import pdb; pdb.set_trace()
+  import pdb; pdb.set_trace()
   app.run(main)
