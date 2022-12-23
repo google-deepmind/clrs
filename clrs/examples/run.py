@@ -117,6 +117,8 @@ flags.DEFINE_string('checkpoint_path', './checkpoints',
                     'Path in which checkpoints are saved.')
 flags.DEFINE_boolean('start_from_checkpoint', False,
                      'Whether to start training from a checkpoint.')
+flags.DEFINE_string('checkpoint_name', 'bfs_epoch_0.pkl',
+                    'Name of checkpoint pkl file to restore.')
 flags.DEFINE_string('dataset_path', '/tmp/CLRS30',
                     'Path in which dataset is stored.')
 flags.DEFINE_boolean('freeze_processor', False,
@@ -528,6 +530,10 @@ def main(unused_argv):
           train_model.init(all_length_features[:-1], FLAGS.seed + 1)
         else:
           train_model.init(all_features, FLAGS.seed + 1)
+        if FLAGS.start_from_checkpoint:
+            epoch = int(FLAGS.checkpoint_name[FLAGS.checkpoint_name.index(".") - 1]) + 1
+            step = epoch * FLAGS.train_steps
+            train_model.restore_model(FLAGS.checkpoint_name, only_load_processor=False)
 
       # Training step.
       for algo_idx in range(len(train_samplers)):
