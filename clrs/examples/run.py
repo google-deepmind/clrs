@@ -251,7 +251,7 @@ def _concat(dps, axis):
   return jax.tree_util.tree_map(lambda *x: np.concatenate(x, axis), *dps)
 
 
-def collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
+def collect_and_eval(sampler, model, algo_idx, sample_count, rng_key, extras):
   """Collect batches of output and hint preds and evaluate them."""
   processed_samples = 0
   preds = []
@@ -261,7 +261,8 @@ def collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
     batch_size = feedback.outputs[0].data.shape[0]
     outputs.append(feedback.outputs)
     new_rng_key, rng_key = jax.random.split(rng_key)
-    cur_preds, _ = predict_fn(new_rng_key, feedback.features)
+    cur_preds, _ = model.predict(new_rng_key, feedback.features, algo_idx)
+    loss, _ = model.feedback(rng_key, feedback, algo_idx)
     preds.append(cur_preds)
     processed_samples += batch_size
   outputs = _concat(outputs, axis=0)
@@ -269,7 +270,7 @@ def collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
   out = clrs.evaluate(outputs, preds)
   if extras:
     out.update(extras)
-  return {k: unpack(v) for k, v in out.items()}
+  return loss, {k: unpack(v) for k, v in out.items()}
 
 
 def create_samplers(rng, train_lengths: List[int]):
@@ -526,18 +527,13 @@ def main(unused_argv):
                            'step': step,
                            'algorithm': FLAGS.algorithms[algo_idx]}
 
-          # Validation loss.
-          feedback_list = [next(t) for t in val_samplers]
-          feedback = feedback_list[algo_idx]
-          rng_key, new_rng_key = jax.random.split(rng_key)
-          val_loss, _ = eval_model.feedback(rng_key, feedback, algo_idx)
-          rng_key = new_rng_key
-
           # Validation info.
           new_rng_key, rng_key = jax.random.split(rng_key)
-          val_stats = collect_and_eval(
+          val_loss, val_stats = collect_and_eval(
               val_samplers[algo_idx],
-              functools.partial(eval_model.predict, algorithm_index=algo_idx),
+              eval_model,
+              algo_idx,
+              # functools.partial(eval_model.predict, algorithm_index=algo_idx),
               val_sample_counts[algo_idx],
               new_rng_key,
               extras=common_extras)
@@ -586,18 +582,13 @@ def main(unused_argv):
                      'step': step,
                      'algorithm': FLAGS.algorithms[algo_idx]}
 
-    # Test loss.
-    feedback_list = [next(t) for t in test_samplers]
-    feedback = feedback_list[algo_idx]
-    rng_key, new_rng_key = jax.random.split(rng_key)
-    test_loss, _ = eval_model.feedback(rng_key, feedback, algo_idx)
-    rng_key = new_rng_key
-
     # Test info.
     new_rng_key, rng_key = jax.random.split(rng_key)
-    test_stats = collect_and_eval(
+    test_loss, test_stats = collect_and_eval(
         test_samplers[algo_idx],
-        functools.partial(eval_model.predict, algorithm_index=algo_idx),
+        # functools.partial(eval_model.predict, algorithm_index=algo_idx),
+        eval_model,
+        algo_idx,
         test_sample_counts[algo_idx],
         new_rng_key,
         extras=common_extras)
