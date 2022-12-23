@@ -115,7 +115,7 @@ flags.DEFINE_enum('processor_type', 'triplet_mpnn',
 # Old checkpoint location /tmp/CLRS30
 flags.DEFINE_string('checkpoint_path', './checkpoints',
                     'Path in which checkpoints are saved.')
-flags.DEFINE_string('dataset_path', './tmp/CLRS30',
+flags.DEFINE_string('dataset_path', '/tmp/CLRS30',
                     'Path in which dataset is stored.')
 flags.DEFINE_boolean('freeze_processor', False,
                      'Whether to freeze the processor of the model.')
@@ -416,22 +416,32 @@ def main(unused_argv):
   else:
     raise ValueError('Hint mode not in {encoded_decoded, decoded_only, none}.')
 
-  # TODO: filename based on experiment setup + filepath
-  csvfile = open('out.csv', 'w', newline='')
-  fieldnames = ["algorithm",
-                "train_loss",
-                "train_accuracy",
-                "learning_rate",
-                "len_train_ds",
-                "len_val_ds",
-                "batches_per_epoch",
-                "time_per_epoch",
-                "fwd_time_in_epoch",
-                "epoch",
-                "step",
-                "val_loss",
-                "val_accuracy"]
-  fwriter = csv.DictWriter(csvfile, fieldnames=fieldnames)
+  # Set up CSV files.
+  csv_path = FLAGS.checkpoint_path + "/csv/"
+  if not os.path.exists(csv_path):
+      os.makedirs(csv_path)
+  csv_files = []
+  csv_writers = []
+  for algo_idx, algorithm in enumerate(FLAGS.algorithms):
+    csv_name = algorithm + '.csv'
+    # TODO: append or delete
+    csv_file = open(csv_path + csv_name, 'w', newline='')
+    csv_files += [csv_file]
+    fieldnames = ["train_loss",
+                  "train_accuracy",
+                  "learning_rate",
+                  "len_train_ds",
+                  "len_val_ds",
+                  "batches_per_epoch",
+                  "time_per_epoch",
+                  "fwd_time_in_epoch",
+                  "epoch",
+                  "step",
+                  "val_loss",
+                  "val_accuracy"]
+    csv_writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+    csv_writer.writeheader()
+    csv_writers += [csv_writer]
 
   train_lengths = [int(x) for x in FLAGS.train_lengths]
 
@@ -495,6 +505,7 @@ def main(unused_argv):
 
   while epoch < FLAGS.epochs:
     time_per_epoch = 0
+    old_current_train_items = current_train_items.copy()
     while step < epoch*FLAGS.train_steps + FLAGS.train_steps:
       # TODO: maybe reuse same input data each epoch instead of random sampling (saving it in memory might be costly)
       feedback_list = [next(t) for t in train_samplers]
@@ -552,10 +563,11 @@ def main(unused_argv):
                          FLAGS.algorithms[algo_idx], epoch,
                          cur_loss, cur_score, cur_lr, current_train_items[algo_idx],
                          time_per_epoch)
-            # TODO: train_accuracy, len_train_ds = batch size for each iteration, cummulated in current_train_items?
-            fwriter.writerow({"algorithm": FLAGS.algorithms[algo_idx],
+            csv_writers[algo_idx].writerow({
                               "train_loss": cur_loss,
+                              "train_accuracy": cur_score,
                               "learning_rate": cur_lr,
+                              "len_train_ds": current_train_items[algo_idx] - old_current_train_items[algo_idx],
                               "batches_per_epoch": FLAGS.train_steps,
                               "time_per_epoch": time_per_epoch,
                               "epoch": epoch,
@@ -584,11 +596,10 @@ def main(unused_argv):
           logging.info('(val) algo %s epoch %d: loss=%f, %s',
                        FLAGS.algorithms[algo_idx], epoch,
                        val_loss, val_stats)
-          # TODO: write to CSV (what to do with algo)
-          # TODO: len_val_ds - equal to batch size?
-          fwriter.writerow({"algorithm": FLAGS.algorithms[algo_idx],
+          csv_writers[algo_idx].writerow({
                             "val_loss": val_loss,
-                            "val_accuracy": val_stats['score'],  # TODO: double-check
+                            "val_accuracy": val_stats['score'],
+                            "len_val_ds": val_sample_counts[algo_idx],
                             "time_per_epoch": time_per_epoch,
                             "epoch": epoch
                             })
@@ -641,9 +652,10 @@ def main(unused_argv):
                  test_loss, test_stats)
 
   logging.info('Done!')
-  csvfile.close()
+  for csv_file in csv_files:
+      csv_file.close()
 
 
 if __name__ == '__main__':
-  import pdb; pdb.set_trace()
+  # import pdb; pdb.set_trace()
   app.run(main)
