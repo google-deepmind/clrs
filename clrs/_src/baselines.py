@@ -333,18 +333,18 @@ class BaselineModel(model.Model):
   def _predict(self, params, rng_key: hk.PRNGSequence, features: _Features,
                algorithm_index: int, return_hints: bool,
                return_all_outputs: bool):
-    outs, hint_preds = self.net_fn.apply(
+    out_preds, hint_preds = self.net_fn.apply(
         params, rng_key, [features],
         repred=True, algorithm_index=algorithm_index,
         return_hints=return_hints,
         return_all_outputs=return_all_outputs)
     outs = decoders.postprocess(self._spec[algorithm_index],
-                                outs,
+                                out_preds,
                                 sinkhorn_temperature=0.1,
                                 sinkhorn_steps=50,
                                 hard=True,
                                 )
-    return outs, hint_preds
+    return outs, out_preds, hint_preds
 
   def compute_grad(
       self,

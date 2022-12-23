@@ -115,7 +115,7 @@ flags.DEFINE_enum('processor_type', 'triplet_mpnn',
 # Old checkpoint location /tmp/CLRS30
 flags.DEFINE_string('checkpoint_path', './checkpoints',
                     'Path in which checkpoints are saved.')
-flags.DEFINE_string('dataset_path', '/tmp/CLRS30',
+flags.DEFINE_string('dataset_path', './tmp/CLRS30',
                     'Path in which dataset is stored.')
 flags.DEFINE_boolean('freeze_processor', False,
                      'Whether to freeze the processor of the model.')
@@ -251,26 +251,55 @@ def _concat(dps, axis):
   return jax.tree_util.tree_map(lambda *x: np.concatenate(x, axis), *dps)
 
 
+def _nb_nodes(feedback: clrs.Feedback, is_chunked) -> int:
+  for inp in feedback.features.inputs:
+    if inp.location in [clrs.Location.NODE, clrs.Location.EDGE]:
+      if is_chunked:
+        return inp.data.shape[2]  # inputs are time x batch x nodes x ...
+      else:
+        return inp.data.shape[1]  # inputs are batch x nodes x ...
+  assert False
+
+
 def collect_and_eval(sampler, model, algo_idx, sample_count, rng_key, extras):
   """Collect batches of output and hint preds and evaluate them."""
   processed_samples = 0
   preds = []
   outputs = []
+  total_loss = 0.0
+
   while processed_samples < sample_count:
     feedback = next(sampler)
     batch_size = feedback.outputs[0].data.shape[0]
     outputs.append(feedback.outputs)
     new_rng_key, rng_key = jax.random.split(rng_key)
-    cur_preds, _ = model.predict(new_rng_key, feedback.features, algo_idx)
-    loss, _ = model.feedback(rng_key, feedback, algo_idx)
+    cur_preds, cur_outs, _ = model.predict(new_rng_key, feedback.features, algo_idx)
     preds.append(cur_preds)
+
+    nb_nodes = _nb_nodes(feedback, is_chunked=False)
+    for truth in feedback.outputs:
+        total_loss += clrs.output_loss(
+            truth=truth,
+            pred=cur_outs[truth.name],
+            nb_nodes=nb_nodes,
+        )
+
     processed_samples += batch_size
   outputs = _concat(outputs, axis=0)
   preds = _concat(preds, axis=0)
   out = clrs.evaluate(outputs, preds)
+
   if extras:
     out.update(extras)
-  return loss, {k: unpack(v) for k, v in out.items()}
+  return total_loss, {k: unpack(v) for k, v in out.items()}
+
+
+def eval_score(model, feedback, algo_idx, rng_key):
+  """Calculate evaluation score for current model given a set of features."""
+  outputs = feedback.outputs
+  preds, _, _ = model.predict(rng_key, feedback.features, algo_idx)
+  out = clrs.evaluate(outputs, preds)
+  return out['score']
 
 
 def create_samplers(rng, train_lengths: List[int]):
@@ -491,7 +520,8 @@ def main(unused_argv):
         time_per_step = time.time() - start_time
         time_per_epoch += time_per_step
 
-        rng_key = new_rng_key
+        rng_key, new_rng_key = jax.random.split(new_rng_key)
+        cur_score = eval_score(train_model, feedback, algo_idx, new_rng_key)
 
         if FLAGS.chunked_training:
           examples_in_chunk = np.sum(feedback.features.is_last).item()
@@ -499,15 +529,17 @@ def main(unused_argv):
           examples_in_chunk = len(feedback.features.lengths)
         current_train_items[algo_idx] += examples_in_chunk
         # to compare results with the standard 32-batch_size experiments
-        logging.info('Algo %s step %i current loss %f, current lr %f, current_train_items %i, time_per_step %f.',
+        logging.info('Algo %s step %i: current loss %f, current score %f, current lr %f, current_train_items %i, '
+                     'time_per_step %f.',
                      FLAGS.algorithms[algo_idx], step,
-                     cur_loss, cur_lr, current_train_items[algo_idx],
+                     cur_loss, cur_score, cur_lr, current_train_items[algo_idx],
                      time_per_step)
         # log at the last training step of each epoch.
         if step == epoch*FLAGS.train_steps + FLAGS.train_steps - 1:
-            logging.info('Algo %s epoch %i current loss %f, current lr %f, current_train_items %i, time_per_epoch %f.',
+            logging.info('Algo %s epoch %i: current loss %f, current score %f, current lr %f, current_train_items %i, '
+                         'time_per_epoch %f.',
                          FLAGS.algorithms[algo_idx], epoch,
-                         cur_loss, cur_lr, current_train_items[algo_idx],
+                         cur_loss, cur_score, cur_lr, current_train_items[algo_idx],
                          time_per_epoch)
             # TODO: train_accuracy, len_train_ds = batch size for each iteration, cummulated in current_train_items?
             fwriter.writerow({"algorithm": FLAGS.algorithms[algo_idx],
@@ -600,4 +632,5 @@ def main(unused_argv):
 
 
 if __name__ == '__main__':
+  # import pdb; pdb.set_trace()
   app.run(main)
