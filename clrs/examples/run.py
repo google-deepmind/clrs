@@ -115,6 +115,8 @@ flags.DEFINE_enum('processor_type', 'triplet_mpnn',
 # Old checkpoint location /tmp/CLRS30
 flags.DEFINE_string('checkpoint_path', './checkpoints',
                     'Path in which checkpoints are saved.')
+flags.DEFINE_boolean('start_from_checkpoint', False,
+                     'Whether to start training from a checkpoint.')
 flags.DEFINE_string('dataset_path', '/tmp/CLRS30',
                     'Path in which dataset is stored.')
 flags.DEFINE_boolean('freeze_processor', False,
@@ -422,10 +424,13 @@ def main(unused_argv):
       os.makedirs(csv_path)
   csv_files = []
   csv_writers = []
+  if FLAGS.start_from_checkpoint:
+      write_flag = 'a'
+  else:
+      write_flag = 'w'
   for algo_idx, algorithm in enumerate(FLAGS.algorithms):
     csv_name = algorithm + '.csv'
-    # TODO: append or delete
-    csv_file = open(csv_path + csv_name, 'w', newline='')
+    csv_file = open(csv_path + csv_name, write_flag, newline='')
     csv_files += [csv_file]
     fieldnames = ["train_loss",
                   "train_accuracy",
