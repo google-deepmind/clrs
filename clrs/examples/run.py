@@ -215,7 +215,10 @@ def make_sampler(length: int,
                                                      split=split)
     sampler = sampler.as_numpy_iterator()
   else:
-    num_samples = clrs.CLRS30[split]['num_samples'] * multiplier
+    # num_samples = clrs.CLRS30[split]['num_samples'] * multiplier
+    num_samples = batch_size * multiplier    # Alternatively, we can pass num_samples directly to control dataset size
+                                             # The reason they have multiplier seems to control "generate on the fly
+                                             # with unlimited data" or "generate in advance with pre-defined size"
     sampler, spec = clrs.build_sampler(
         algorithm,
         seed=rng.randint(2**32),
@@ -366,7 +369,13 @@ def create_samplers(rng, train_lengths: List[int]):
       train_args = dict(sizes=train_lengths,
                         split='train',
                         batch_size=FLAGS.batch_size,
-                        multiplier=-1,
+                        multiplier=FLAGS.train_steps,
+                        # Original code passes "-1", which generates unlimited samples
+                        # on the fly. If we pass a positive integer, then it will
+                        # generate multiplier * clrs.CLRS30["train"]["num_samples"] (=> I changed to match batch_size)
+                        # samples in advance. Then each sampler.next() randomly samples
+                        # a subset of data with batch_size from these pre-generated samples.
+                        # N.B. It seems to generate a dataset for each process in multi-core setting?
                         randomize_pos=FLAGS.random_pos,
                         chunked=FLAGS.chunked_training,
                         sampler_kwargs=sampler_kwargs,
