@@ -209,6 +209,8 @@ def make_sampler(length: int,
     if infinite samples), and the spec.
   """
   if length < 0:  # load from file
+    # Currently, val & test are taken from CLRS benchmarking dataset
+    # with their pre-defined num_samples & sizes
     dataset_folder = _maybe_download_dataset(FLAGS.dataset_path)
     sampler, num_samples, spec = clrs.create_dataset(folder=dataset_folder,
                                                      algorithm=algorithm,

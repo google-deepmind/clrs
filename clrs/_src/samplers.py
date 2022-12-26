@@ -92,6 +92,7 @@ class Sampler(abc.ABC):
     self._rng = np.random.RandomState(seed)
     self._spec = spec
     self._num_samples = num_samples
+    self._remain_data_indices = []
     self._algorithm = algorithm
     self._args = args
     self._kwargs = kwargs
@@ -160,9 +161,14 @@ class Sampler(abc.ABC):
           raise ValueError(
               f'Batch size {batch_size} > dataset size {self._num_samples}.')
 
+        if batch_size > len(self._remain_data_indices):
+            self._remain_data_indices = [i for i in range(self._num_samples)]
+            logging.info(f"Not enough samples. Reloading pre-generated dataset of size {self._num_samples}.")
+
         # Returns a fixed-size random batch.
-        indices = self._rng.choice(self._num_samples, (batch_size,),
-                                   replace=True)
+        indices = self._rng.choice(self._remain_data_indices, (batch_size,),
+                                   replace=False)
+        self._remain_data_indices = [i for i in self._remain_data_indices if i not in indices]
         inputs = _subsample_data(self._inputs, indices, axis=0)
         outputs = _subsample_data(self._outputs, indices, axis=0)
         hints = _subsample_data(self._hints, indices, axis=1)
