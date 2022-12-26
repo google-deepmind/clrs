@@ -59,7 +59,7 @@ flags.DEFINE_integer('chunk_length', 16,
                      '`chunked_training` is True.')
 flags.DEFINE_integer('epochs', 3, 'Number of epochs for training.')
 flags.DEFINE_integer('train_steps', 5, 'Number of training iterations per epoch.')
-
+flags.DEFINE_integer('train_samples', 150, 'Number of training samples for each graph size.')
 flags.DEFINE_integer('hidden_size', 128,
                      'Number of hidden units of the model.')
 flags.DEFINE_integer('nb_heads', 1, 'Number of heads for GAT processors')
@@ -183,7 +183,8 @@ def make_sampler(length: int,
                  enforce_permutations: bool,
                  chunked: bool,
                  chunk_length: int,
-                 sampler_kwargs: Dict[str, Any]):
+                 sampler_kwargs: Dict[str, Any],
+                 set_num_samples=None):
   """Create a sampler with given options.
 
   Args:
@@ -216,9 +217,12 @@ def make_sampler(length: int,
     sampler = sampler.as_numpy_iterator()
   else:
     # num_samples = clrs.CLRS30[split]['num_samples'] * multiplier
-    num_samples = batch_size * multiplier    # Alternatively, we can pass num_samples directly to control dataset size
-                                             # The reason they have multiplier seems to control "generate on the fly
-                                             # with unlimited data" or "generate in advance with pre-defined size"
+    # num_samples = batch_size * multiplier    # The reason they have multiplier seems to control "generate on the fly
+                                               # with unlimited data" or "generate in advance with pre-defined size"
+    if set_num_samples:
+        num_samples = set_num_samples
+    else:
+        num_samples = batch_size * multiplier
     sampler, spec = clrs.build_sampler(
         algorithm,
         seed=rng.randint(2**32),
@@ -238,12 +242,12 @@ def make_sampler(length: int,
   return sampler, num_samples, spec
 
 
-def make_multi_sampler(sizes, rng, **kwargs):
+def make_multi_sampler(sizes, rng, set_num_samples=None, **kwargs):
   """Create a sampler with cycling sample sizes."""
   ss = []
   tot_samples = 0
   for length in sizes:
-    sampler, num_samples, spec = make_sampler(length, rng, **kwargs)
+    sampler, num_samples, spec = make_sampler(length, rng, set_num_samples=set_num_samples, **kwargs)
     ss.append(sampler)
     tot_samples += num_samples
 
@@ -372,10 +376,10 @@ def create_samplers(rng, train_lengths: List[int]):
                         multiplier=FLAGS.train_steps,
                         # Original code passes "-1", which generates unlimited samples
                         # on the fly. If we pass a positive integer, then it will
-                        # generate multiplier * clrs.CLRS30["train"]["num_samples"] (=> I changed to match batch_size)
+                        # generate multiplier * clrs.CLRS30["train"]["num_samples"] (=> I changed)
                         # samples in advance. Then each sampler.next() randomly samples
                         # a subset of data with batch_size from these pre-generated samples.
-                        # N.B. It seems to generate a dataset for each process in multi-core setting?
+                        set_num_samples=FLAGS.train_samples,
                         randomize_pos=FLAGS.random_pos,
                         chunked=FLAGS.chunked_training,
                         sampler_kwargs=sampler_kwargs,
