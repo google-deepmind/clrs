@@ -422,20 +422,7 @@ def create_samplers(rng, train_lengths: List[int]):
           spec_list)
 
 
-def main(unused_argv):
-  if FLAGS.hint_mode == 'encoded_decoded':
-    encode_hints = True
-    decode_hints = True
-  elif FLAGS.hint_mode == 'decoded_only':
-    encode_hints = False
-    decode_hints = True
-  elif FLAGS.hint_mode == 'none':
-    encode_hints = False
-    decode_hints = False
-  else:
-    raise ValueError('Hint mode not in {encoded_decoded, decoded_only, none}.')
-
-  # Set up CSV files.
+def setup_csv(train_model):
   csv_path = FLAGS.checkpoint_path + "/csv/"
   if not os.path.exists(csv_path):
       os.makedirs(csv_path)
@@ -456,14 +443,36 @@ def main(unused_argv):
                   "len_val_ds",
                   "batches_per_epoch",
                   "time_per_epoch",
-                  "fwd_time_in_epoch",
                   "epoch",
                   "step",
                   "val_loss",
                   "val_accuracy"]
+
+    # Track model weight evolution
+    for layer, _ in train_model.params.items():
+      if 'w' in train_model.params[layer]:
+        fieldnames.append(layer + '.weight_norm')
+        fieldnames.append(layer + '.weight_list')
+    
     csv_writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
     csv_writer.writeheader()
     csv_writers += [csv_writer]
+
+  return csv_files, csv_writers
+
+
+def main(unused_argv):
+  if FLAGS.hint_mode == 'encoded_decoded':
+    encode_hints = True
+    decode_hints = True
+  elif FLAGS.hint_mode == 'decoded_only':
+    encode_hints = False
+    decode_hints = True
+  elif FLAGS.hint_mode == 'none':
+    encode_hints = False
+    decode_hints = False
+  else:
+    raise ValueError('Hint mode not in {encoded_decoded, decoded_only, none}.')
 
   train_lengths = [int(x) for x in FLAGS.train_lengths]
 
@@ -550,6 +559,8 @@ def main(unused_argv):
             step = epoch * FLAGS.train_steps
             train_model.restore_model(FLAGS.checkpoint_name, only_load_processor=False)
 
+        csv_files, csv_writers = setup_csv(train_model)
+
       # Training step.
       for algo_idx in range(len(train_samplers)):
         feedback = feedback_list[algo_idx]
@@ -582,6 +593,7 @@ def main(unused_argv):
                      FLAGS.algorithms[algo_idx], step,
                      cur_loss, cur_score, cur_lr, current_train_items[algo_idx],
                      time_per_step)
+
         # log at the last training step of each epoch.
         if step == epoch*FLAGS.train_steps + FLAGS.train_steps - 1:
             logging.info('Algo %s epoch %i: current loss %f, current score %f, current lr %f, current_train_items %i, '
@@ -599,6 +611,14 @@ def main(unused_argv):
                               "epoch": epoch,
                               "step": step
                               })
+            
+            weight_logs = {}
+            for layer, _ in train_model.params.items():
+              if 'w' in train_model.params[layer]:
+                norm = jax.numpy.linalg.norm(train_model.params[layer]['w'], ord=2)
+                weight_logs[layer + '.weight_norm'] = norm
+                weight_logs[layer + '.weight_list'] = jax.numpy.ravel(train_model.params[layer]['w'])
+            csv_writers[algo_idx].writerow(weight_logs)
 
       # Validation step at the last training step of each epoch.
       if step == epoch*FLAGS.train_steps + FLAGS.train_steps - 1:
