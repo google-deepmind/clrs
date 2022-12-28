@@ -35,6 +35,9 @@ def construct_encoders(stage: str, loc: str, t: str,
   if init == 'xavier_on_scalars' and stage == _Stage.HINT and t == _Type.SCALAR:
     initialiser = hk.initializers.TruncatedNormal(
         stddev=1.0 / jnp.sqrt(hidden_dim))
+  elif init == "large":
+    initialiser = hk.initializers.TruncatedNormal(
+        stddev=1.0 / jnp.sqrt(hidden_dim), mean=10) 
   elif init in ['default', 'xavier_on_scalars']:
     initialiser = None
   else:
