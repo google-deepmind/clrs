@@ -103,7 +103,7 @@ flags.DEFINE_integer('nb_triplet_fts', 8,
                      'How many triplet features to compute?')
 
 flags.DEFINE_enum('encoder_init', 'default',
-                  ['default', 'xavier_on_scalars'],
+                  ['default', 'xavier_on_scalars', 'large'],
                   'Initialiser to use for the encoders.')
 flags.DEFINE_enum('processor_type', 'triplet_mpnn',
                   ['deepsets', 'mpnn', 'pgn', 'pgn_mask',
@@ -651,9 +651,9 @@ def main(unused_argv):
                             })
           val_scores[algo_idx] = val_stats['score']
 
-          logging.info('Checkpointing algorithm %s for epoch %d', FLAGS.algorithms[algo_idx], epoch)
-          checkpoint_name = FLAGS.algorithms[algo_idx] + '_epoch_' + str(epoch) + '.pkl' 
-          train_model.save_model(checkpoint_name)
+          # logging.info('Checkpointing algorithm %s for epoch %d', FLAGS.algorithms[algo_idx], epoch)
+          # checkpoint_name = FLAGS.algorithms[algo_idx] + '_epoch_' + str(epoch) + '.pkl' 
+          # train_model.save_model(checkpoint_name)
 
 
         # If best total score, update best checkpoint.
