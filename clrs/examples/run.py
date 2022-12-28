@@ -452,7 +452,7 @@ def setup_csv(train_model):
     for layer, _ in train_model.params.items():
       if 'w' in train_model.params[layer]:
         fieldnames.append(layer + '.weight_norm')
-        fieldnames.append(layer + '.weight_list')
+        # fieldnames.append(layer + '.weight_list')
     
     csv_writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
     csv_writer.writeheader()
@@ -612,12 +612,12 @@ def main(unused_argv):
                               "step": step
                               })
             
-            weight_logs = {}
+            weight_logs = {"epoch": epoch}
             for layer, _ in train_model.params.items():
               if 'w' in train_model.params[layer]:
                 norm = jax.numpy.linalg.norm(train_model.params[layer]['w'], ord=2)
                 weight_logs[layer + '.weight_norm'] = norm
-                weight_logs[layer + '.weight_list'] = jax.numpy.ravel(train_model.params[layer]['w'])
+                # weight_logs[layer + '.weight_list'] = jax.numpy.ravel(train_model.params[layer]['w'])
             csv_writers[algo_idx].writerow(weight_logs)
 
       # Validation step at the last training step of each epoch.
