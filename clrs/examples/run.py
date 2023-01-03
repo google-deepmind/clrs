@@ -31,11 +31,21 @@ import numpy as np
 import requests
 import tensorflow as tf
 
-
+# Parameters to tune
 flags.DEFINE_list('algorithms', ['bfs'], 'Which algorithms to run.')
-flags.DEFINE_list('train_lengths', ['4', '7', '11', '13', '16'],
+flags.DEFINE_list('train_lengths', ['16'],
                   'Which training sizes to use. A size of -1 means '
                   'use the benchmark dataset.')
+flags.DEFINE_list('val_lengths', ['16', '32', '64'],
+                  'Which validation sizes to use. A size of -1 means '
+                  'use the benchmark dataset.')
+flags.DEFINE_integer('train_samples', 150, 'Number of training samples for each graph size.')
+flags.DEFINE_integer('val_samples', 100, 'Number of validation samples for each graph size.')
+flags.DEFINE_integer('epochs', 3, 'Number of epochs for training.')
+flags.DEFINE_integer('train_steps', 5, 'Number of training iterations per epoch.')
+flags.DEFINE_float('learning_rate', 0.0001, 'Learning rate to use.')
+
+# Other parameters
 flags.DEFINE_integer('length_needle', -8,
                      'Length of needle for training and validation '
                      '(not testing) in string matching algorithms. '
@@ -57,15 +67,11 @@ flags.DEFINE_boolean('chunked_training', False,
 flags.DEFINE_integer('chunk_length', 16,
                      'Time chunk length used for training (if '
                      '`chunked_training` is True.')
-flags.DEFINE_integer('epochs', 3, 'Number of epochs for training.')
-flags.DEFINE_integer('train_steps', 5, 'Number of training iterations per epoch.')
-flags.DEFINE_integer('train_samples', 150, 'Number of training samples for each graph size.')
 flags.DEFINE_integer('hidden_size', 128,
                      'Number of hidden units of the model.')
 flags.DEFINE_integer('nb_heads', 1, 'Number of heads for GAT processors')
 flags.DEFINE_integer('nb_msg_passing_steps', 1,
                      'Number of message passing steps to run per hint.')
-flags.DEFINE_float('learning_rate', 0.001, 'Learning rate to use.')
 flags.DEFINE_float('grad_clip_max_norm', 0.0,
                    'Gradient clipping by norm. 0.0 disables grad clipping')
 flags.DEFINE_float('dropout_prob', 0.0, 'Dropout rate to use.')
@@ -260,6 +266,16 @@ def make_multi_sampler(sizes, rng, set_num_samples=None, **kwargs):
   return cycle_samplers(), tot_samples, spec
 
 
+def make_multi_sampler_list(sizes, rng, set_num_samples=None, **kwargs):
+  ss = []
+  tot_samples = 0
+  for length in sizes:
+    sampler, num_samples, spec = make_sampler(length, rng, set_num_samples=set_num_samples, **kwargs)
+    ss.append(sampler)
+    tot_samples += num_samples
+  return ss, tot_samples, spec
+
+
 def _concat(dps, axis):
   return jax.tree_util.tree_map(lambda *x: np.concatenate(x, axis), *dps)
 
@@ -326,7 +342,7 @@ def eval_score(model, feedback, algo_idx, rng_key):
   return out['score']
 
 
-def create_samplers(rng, train_lengths: List[int]):
+def create_samplers(rng, train_lengths: List[int], val_lengths: List[int]):
   """Create all the samplers."""
   train_samplers = []
   val_samplers = []
@@ -389,15 +405,16 @@ def create_samplers(rng, train_lengths: List[int]):
       train_sampler, _, spec = make_multi_sampler(**train_args)
 
       mult = clrs.CLRS_30_ALGS_SETTINGS[algorithm]['num_samples_multiplier']
-      val_args = dict(sizes=[-1],
+      val_args = dict(sizes=val_lengths,
                       split='val',
-                      batch_size=32,
+                      batch_size=None,
                       multiplier=mult,
+                      set_num_samples=FLAGS.val_samples,
                       randomize_pos=FLAGS.random_pos,
                       chunked=False,
                       sampler_kwargs=sampler_kwargs,
                       **common_sampler_args)
-      val_sampler, val_samples, spec = make_multi_sampler(**val_args)
+      val_sampler, val_samples, spec = make_multi_sampler_list(**val_args)
 
       test_args = dict(sizes=[-1],
                        split='test',
@@ -445,14 +462,20 @@ def setup_csv(train_model):
                   "time_per_epoch",
                   "epoch",
                   "step",
-                  "val_loss",
-                  "val_accuracy"]
+                  "avg_val_loss",
+                  "avg_val_accuracy"]
+
+    # Validation result for each graph size
+    for length in FLAGS.val_lengths:
+        fieldnames.append('val_size_' + str(length) + '_loss')
+        fieldnames.append('val_size_' + str(length) + '_accuracy')
 
     # Track model weight evolution
     for layer, _ in train_model.params.items():
       if 'w' in train_model.params[layer]:
         fieldnames.append(layer + '.weight_norm')
         # fieldnames.append(layer + '.weight_list')
+
     
     csv_writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
     csv_writer.writeheader()
@@ -475,6 +498,7 @@ def main(unused_argv):
     raise ValueError('Hint mode not in {encoded_decoded, decoded_only, none}.')
 
   train_lengths = [int(x) for x in FLAGS.train_lengths]
+  val_lengths = [int(x) for x in FLAGS.val_lengths]
 
   rng = np.random.RandomState(FLAGS.seed)
   rng_key = jax.random.PRNGKey(rng.randint(2**32))
@@ -483,7 +507,7 @@ def main(unused_argv):
   (train_samplers,
    val_samplers, val_sample_counts,
    test_samplers, test_sample_counts,
-   spec_list) = create_samplers(rng, train_lengths)
+   spec_list) = create_samplers(rng, train_lengths, val_lengths)
 
   processor_factory = clrs.get_processor_factory(
       FLAGS.processor_type,
@@ -510,7 +534,7 @@ def main(unused_argv):
 
   eval_model = clrs.models.BaselineModel(
       spec=spec_list,
-      dummy_trajectory=[next(t) for t in val_samplers],
+      dummy_trajectory=[next(val_samplers[0][0])],
       **model_params
   )
   if FLAGS.chunked_training:
@@ -538,7 +562,6 @@ def main(unused_argv):
     time_per_epoch = 0
     old_current_train_items = current_train_items.copy()
     while step < epoch*FLAGS.train_steps + FLAGS.train_steps:
-      # TODO: maybe reuse same input data each epoch instead of random sampling (saving it in memory might be costly)
       feedback_list = [next(t) for t in train_samplers]
 
       # Initialize model.
@@ -630,26 +653,35 @@ def main(unused_argv):
 
           # Validation info.
           new_rng_key, rng_key = jax.random.split(rng_key)
-          val_loss, val_stats = collect_and_eval(
-              val_samplers[algo_idx],
-              eval_model,
-              algo_idx,
-              # functools.partial(eval_model.predict, algorithm_index=algo_idx),
-              val_sample_counts[algo_idx],
-              new_rng_key,
-              decode_hints,
-              extras=common_extras)
-          logging.info('(val) algo %s epoch %d: loss=%f, %s',
-                       FLAGS.algorithms[algo_idx], epoch,
-                       val_loss, val_stats)
-          csv_writers[algo_idx].writerow({
-                            "val_loss": val_loss,
-                            "val_accuracy": val_stats['score'],
-                            "len_val_ds": val_sample_counts[algo_idx],
-                            "time_per_epoch": time_per_epoch,
-                            "epoch": epoch
-                            })
-          val_scores[algo_idx] = val_stats['score']
+          val_losses = []
+          val_accuracies = []
+          for i, sampler in enumerate(val_samplers[algo_idx]):
+              val_loss, val_stats = collect_and_eval(
+                  sampler,
+                  eval_model,
+                  algo_idx,
+                  # functools.partial(eval_model.predict, algorithm_index=algo_idx),
+                  FLAGS.val_samples,
+                  new_rng_key,
+                  decode_hints,
+                  extras=common_extras)
+              logging.info('(val) algo %s size %d epoch %d: loss=%f, %s',
+                           FLAGS.algorithms[algo_idx], val_lengths[i], epoch,
+                           val_loss, val_stats)
+              val_losses += [val_loss]
+              val_accuracies += [val_stats['score']]
+
+          val_dict = {}
+          for i, length in enumerate(val_lengths):
+              val_dict[f"val_size_{length}_loss"] = val_losses[i]
+              val_dict[f"val_size_{length}_accuracy"] = val_accuracies[i]
+          val_dict["avg_val_loss"] = sum(val_losses) / len(val_losses)
+          val_dict["avg_val_accuracy"] = sum(val_accuracies) / len(val_accuracies)
+          val_dict["len_val_ds"] = val_sample_counts[algo_idx]
+          val_dict["time_per_epoch"] = time_per_epoch
+          val_dict["epoch"] = epoch
+          csv_writers[algo_idx].writerow(val_dict)
+          val_scores[algo_idx] = sum(val_accuracies) / len(val_accuracies)
 
           # logging.info('Checkpointing algorithm %s for epoch %d', FLAGS.algorithms[algo_idx], epoch)
           # checkpoint_name = FLAGS.algorithms[algo_idx] + '_epoch_' + str(epoch) + '.pkl' 
