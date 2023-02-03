@@ -43,9 +43,9 @@ flags.DEFINE_integer('length_needle', -8,
                      'the haystack (the default sampler behavior).')
 flags.DEFINE_integer('seed', 42, 'Random seed to set')
 
-flags.DEFINE_boolean('random_pos', False,
+flags.DEFINE_boolean('random_pos', True,
                      'Randomize the pos input common to all algos.')
-flags.DEFINE_boolean('enforce_permutations', False,
+flags.DEFINE_boolean('enforce_permutations', True,
                      'Whether to enforce permutation-type node pointers.')
 flags.DEFINE_boolean('enforce_pred_as_input', True,
                      'Whether to change pred_h hints into pred inputs.')
@@ -55,8 +55,9 @@ flags.DEFINE_boolean('chunked_training', False,
 flags.DEFINE_integer('chunk_length', 16,
                      'Time chunk length used for training (if '
                      '`chunked_training` is True.')
-flags.DEFINE_integer('train_steps', 30000, 'Number of training iterations.')
-flags.DEFINE_integer('eval_every', 500, 'Evaluation frequency (in steps).')
+flags.DEFINE_integer('train_steps', 10000, 'Number of training iterations.')
+flags.DEFINE_integer('eval_every', 50, 'Evaluation frequency (in steps).')
+flags.DEFINE_integer('test_every', 500, 'Evaluation frequency (in steps).')
 
 flags.DEFINE_integer('hidden_size', 128,
                      'Number of hidden units of the model.')
@@ -64,7 +65,7 @@ flags.DEFINE_integer('nb_heads', 1, 'Number of heads for GAT processors')
 flags.DEFINE_integer('nb_msg_passing_steps', 1,
                      'Number of message passing steps to run per hint.')
 flags.DEFINE_float('learning_rate', 0.001, 'Learning rate to use.')
-flags.DEFINE_float('grad_clip_max_norm', 0.0,
+flags.DEFINE_float('grad_clip_max_norm', 1.0,
                    'Gradient clipping by norm. 0.0 disables grad clipping')
 flags.DEFINE_float('dropout_prob', 0.0, 'Dropout rate to use.')
 flags.DEFINE_float('hint_teacher_forcing', 0.0,
@@ -100,10 +101,10 @@ flags.DEFINE_boolean('use_lstm', False,
 flags.DEFINE_integer('nb_triplet_fts', 8,
                      'How many triplet features to compute?')
 
-flags.DEFINE_enum('encoder_init', 'default',
+flags.DEFINE_enum('encoder_init', 'xavier_on_scalars',
                   ['default', 'xavier_on_scalars'],
                   'Initialiser to use for the encoders.')
-flags.DEFINE_enum('processor_type', 'triplet_mpnn',
+flags.DEFINE_enum('processor_type', 'triplet_gmpnn',
                   ['deepsets', 'mpnn', 'pgn', 'pgn_mask',
                    'triplet_mpnn', 'triplet_pgn', 'triplet_pgn_mask',
                    'gat', 'gatv2', 'gat_full', 'gatv2_full',
@@ -327,10 +328,10 @@ def create_samplers(rng, train_lengths: List[int]):
       train_sampler, _, spec = make_multi_sampler(**train_args)
 
       mult = clrs.CLRS_30_ALGS_SETTINGS[algorithm]['num_samples_multiplier']
-      val_args = dict(sizes=[-1],
+      val_args = dict(sizes=[np.amax(train_lengths)],
                       split='val',
                       batch_size=32,
-                      multiplier=mult,
+                      multiplier=2 * mult,
                       randomize_pos=FLAGS.random_pos,
                       chunked=False,
                       sampler_kwargs=sampler_kwargs,
@@ -468,7 +469,6 @@ def main(unused_argv):
       else:
         examples_in_chunk = len(feedback.features.lengths)
       current_train_items[algo_idx] += examples_in_chunk
-      # to compare results with the standard 32-batch_size experiments
       logging.info('Algo %s step %i current loss %f, current_train_items %i.',
                    FLAGS.algorithms[algo_idx], step,
                    cur_loss, current_train_items[algo_idx])
