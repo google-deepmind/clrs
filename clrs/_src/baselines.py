@@ -277,7 +277,7 @@ class BaselineModel(model.Model):
     if not isinstance(features, list):
       assert len(self._spec) == 1
       features = [features]
-    self.params = self.net_fn.init(jax.random.PRNGKey(seed), features, True,
+    self.params = self.net_fn.init(jax.random.PRNGKey(seed), features, True,  # pytype: disable=wrong-arg-types  # jax-ndarray
                                    algorithm_index=-1,
                                    return_hints=False,
                                    return_all_outputs=False)
@@ -551,10 +551,10 @@ class BaselineModelChunked(BaselineModel):
            features: List[List[_FeaturesChunked]],
            seed: _Seed):
     self.mp_states = self._init_mp_state(features,
-                                         jax.random.PRNGKey(seed))
+                                         jax.random.PRNGKey(seed))  # pytype: disable=wrong-arg-types  # jax-ndarray
     self.init_mp_states = [list(x) for x in self.mp_states]
     self.params = self.net_fn.init(
-        jax.random.PRNGKey(seed), features[0], self.mp_states[0],
+        jax.random.PRNGKey(seed), features[0], self.mp_states[0],  # pytype: disable=wrong-arg-types  # jax-ndarray
         True, init_mp_state=False, algorithm_index=-1)
     self.opt_state = self.opt.init(self.params)
     # We will use the optimizer state skeleton for traversal when we

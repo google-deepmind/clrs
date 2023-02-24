@@ -117,7 +117,7 @@ class BaselinesTest(parameterized.TestCase):
 
       b_full = baselines.BaselineModel(
           spec, dummy_trajectory=full_batches[0], **common_args)
-      b_full.init(full_batches[0].features, seed=42)
+      b_full.init(full_batches[0].features, seed=42)  # pytype: disable=wrong-arg-types  # jax-ndarray
       full_params = b_full.params
       full_loss_0 = b_full.feedback(rng_key, full_batches[0])
       b_full.params = full_params
@@ -126,7 +126,7 @@ class BaselinesTest(parameterized.TestCase):
 
       b_chunked = baselines.BaselineModelChunked(
           spec, dummy_trajectory=chunked_batches[0], **common_args)
-      b_chunked.init([[chunked_batches[0].features]], seed=42)
+      b_chunked.init([[chunked_batches[0].features]], seed=42)  # pytype: disable=wrong-arg-types  # jax-ndarray
       chunked_params = b_chunked.params
       jax.tree_util.tree_map(np.testing.assert_array_equal, full_params,
                              chunked_params)
@@ -181,8 +181,8 @@ class BaselinesTest(parameterized.TestCase):
           spec[0], dummy_trajectory=full_batches[0], **common_args)
       b_multi = baselines.BaselineModel(
           spec, dummy_trajectory=full_batches, **common_args)
-      b_single.init(full_batches[0].features, seed=0)
-      b_multi.init([f.features for f in full_batches], seed=0)
+      b_single.init(full_batches[0].features, seed=0)  # pytype: disable=wrong-arg-types  # jax-ndarray
+      b_multi.init([f.features for f in full_batches], seed=0)  # pytype: disable=wrong-arg-types  # jax-ndarray
 
       single_params = []
       single_losses = []
@@ -251,11 +251,11 @@ class BaselinesTest(parameterized.TestCase):
     if is_chunked:
       baseline = baselines.BaselineModelChunked(
           spec, dummy_trajectory=batches, **common_args)
-      baseline.init([[f.features for f in batches]], seed=0)
+      baseline.init([[f.features for f in batches]], seed=0)  # pytype: disable=wrong-arg-types  # jax-ndarray
     else:
       baseline = baselines.BaselineModel(
           spec, dummy_trajectory=batches, **common_args)
-      baseline.init([f.features for f in batches], seed=0)
+      baseline.init([f.features for f in batches], seed=0)  # pytype: disable=wrong-arg-types  # jax-ndarray
 
     # Find out what parameters change when we train each algorithm
     def _change(x, y):
