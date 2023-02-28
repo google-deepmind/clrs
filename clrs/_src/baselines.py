@@ -34,6 +34,7 @@ from clrs._src import specs
 import haiku as hk
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax
 
 
@@ -767,15 +768,19 @@ def filter_null_grads(grads, opt, opt_state, opt_state_skeleton, algo_idx):
     masked_grads = {k: _keep_in_algo(k, v) for k, v in grads.items()}
   flat_grads, treedef = jax.tree_util.tree_flatten(masked_grads)
   flat_opt_state = jax.tree_util.tree_map(
-      lambda _, x: treedef.flatten_up_to(x)  # pylint:disable=g-long-lambda
-      if not isinstance(x, _Array) else x, opt_state_skeleton, opt_state)
+      lambda _, x: x  # pylint:disable=g-long-lambda
+      if isinstance(x, (np.ndarray, jax.Array))
+      else treedef.flatten_up_to(x),
+      opt_state_skeleton,
+      opt_state,
+  )
 
   # Compute updates only for the params with gradient.
   flat_updates, flat_opt_state = opt_update(opt, flat_grads, flat_opt_state)
 
   def unflatten(flat, original):
     """Restore tree structure, filling missing (None) leaves with original."""
-    if isinstance(flat, _Array):
+    if isinstance(flat, (np.ndarray, jax.Array)):
       return flat
     return jax.tree_util.tree_map(lambda x, y: x if y is None else y, original,
                                   treedef.unflatten(flat))
