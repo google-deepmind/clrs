@@ -69,8 +69,8 @@ class CLRSDataset(tfds.core.GeneratorBasedBuilder):
   _instantiated_dataset_split = ''
 
   def _num_samples(self, algorithm_name):
-    num_samples = samplers.CLRS30[self._builder_config.split]['num_samples']
-    if self._builder_config.split != 'train':
+    num_samples = samplers.CLRS30[self._builder_config.split]['num_samples']  # pytype: disable=attribute-error  # always-use-return-annotations
+    if self._builder_config.split != 'train':  # pytype: disable=attribute-error  # always-use-return-annotations
       # Generate more samples for those algorithms in which the number of
       # signals is small.
       num_samples *= specs.CLRS_30_ALGS_SETTINGS[algorithm_name][
@@ -82,9 +82,9 @@ class CLRSDataset(tfds.core.GeneratorBasedBuilder):
     num_samples = self._num_samples(algorithm_name)
     sampler, _ = samplers.build_sampler(
         algorithm_name,
-        seed=samplers.CLRS30[self._builder_config.split]['seed'],
+        seed=samplers.CLRS30[self._builder_config.split]['seed'],  # pytype: disable=attribute-error  # always-use-return-annotations
         num_samples=num_samples,
-        length=samplers.CLRS30[self._builder_config.split]['length'],
+        length=samplers.CLRS30[self._builder_config.split]['length'],  # pytype: disable=attribute-error  # always-use-return-annotations
     )
     sampled_dataset = sampler.next(batch_size=1 if single_sample else None)
     data = {'input_' + t.name: t.data for t in sampled_dataset.features.inputs}
@@ -103,7 +103,7 @@ class CLRSDataset(tfds.core.GeneratorBasedBuilder):
       return info
 
     if (self._instantiated_dataset_name != self._builder_config.name
-        or self._instantiated_dataset_split != self._builder_config.split):
+        or self._instantiated_dataset_split != self._builder_config.split):  # pytype: disable=attribute-error  # always-use-return-annotations
       self._create_data(single_sample=True)
 
     data = {k: _correct_axis_filtering(v, 0, k)
@@ -119,11 +119,11 @@ class CLRSDataset(tfds.core.GeneratorBasedBuilder):
   def _split_generators(self, dl_manager: tfds.download.DownloadManager):
     """Download the data and define splits."""
     if (self._instantiated_dataset_name != self._builder_config.name
-        or self._instantiated_dataset_split != self._builder_config.split):
+        or self._instantiated_dataset_split != self._builder_config.split):  # pytype: disable=attribute-error  # always-use-return-annotations
       self._create_data(single_sample=False)
       self._instantiated_dataset_name = self._builder_config.name
-      self._instantiated_dataset_split = self._builder_config.split
-    return {self._builder_config.split: self._generate_examples()}
+      self._instantiated_dataset_split = self._builder_config.split  # pytype: disable=attribute-error  # always-use-return-annotations
+    return {self._builder_config.split: self._generate_examples()}  # pytype: disable=attribute-error  # always-use-return-annotations
 
   def _generate_examples(self):
     """Generator of examples for each split."""
