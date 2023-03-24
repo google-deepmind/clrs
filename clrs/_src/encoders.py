@@ -88,7 +88,7 @@ def accum_adj_mat(dp: _DataPoint, adj_mat: _Array) -> _Array:
   elif dp.location == _Location.EDGE and dp.type_ == _Type.MASK:
     adj_mat += ((dp.data + jnp.transpose(dp.data, (0, 2, 1))) > 0.0)
 
-  return (adj_mat > 0.).astype('float32')
+  return (adj_mat > 0.).astype('float32')  # pytype: disable=attribute-error  # numpy-scalars
 
 
 def accum_edge_fts(encoders, dp: _DataPoint, edge_fts: _Array) -> _Array:

@@ -176,7 +176,7 @@ def _hint_loss(
   elif truth_type == _Type.MASK:
     loss = (jnp.maximum(pred, 0) - pred * truth_data +
             jnp.log1p(jnp.exp(-jnp.abs(pred))))
-    mask = (truth_data != _OutputClass.MASKED).astype(jnp.float32)
+    mask = (truth_data != _OutputClass.MASKED).astype(jnp.float32)  # pytype: disable=attribute-error  # numpy-scalars
 
   elif truth_type == _Type.MASK_ONE:
     loss = -jnp.sum(truth_data * jax.nn.log_softmax(pred), axis=-1,
@@ -204,6 +204,6 @@ def _hint_loss(
 
 def _is_not_done_broadcast(lengths, i, tensor):
   is_not_done = (lengths > i + 1) * 1.0
-  while len(is_not_done.shape) < len(tensor.shape):
+  while len(is_not_done.shape) < len(tensor.shape):  # pytype: disable=attribute-error  # numpy-scalars
     is_not_done = jnp.expand_dims(is_not_done, -1)
   return is_not_done

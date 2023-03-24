@@ -351,7 +351,7 @@ class BaselineModel(model.Model):
     assert algorithm_index >= 0
 
     # Calculate gradients.
-    rng_keys = _maybe_pmap_rng_key(rng_key)
+    rng_keys = _maybe_pmap_rng_key(rng_key)  # pytype: disable=wrong-arg-types  # numpy-scalars
     feedback = _maybe_pmap_data(feedback)
     loss, grads = self.jitted_grad(
         self._device_params, rng_keys, feedback, algorithm_index)
@@ -366,7 +366,7 @@ class BaselineModel(model.Model):
       assert len(self._spec) == 1
       algorithm_index = 0
     # Calculate and apply gradients.
-    rng_keys = _maybe_pmap_rng_key(rng_key)
+    rng_keys = _maybe_pmap_rng_key(rng_key)  # pytype: disable=wrong-arg-types  # numpy-scalars
     feedback = _maybe_pmap_data(feedback)
     loss, self._device_params, self._device_opt_state = self.jitted_feedback(
         self._device_params, rng_keys, feedback,
@@ -383,7 +383,7 @@ class BaselineModel(model.Model):
       assert len(self._spec) == 1
       algorithm_index = 0
 
-    rng_keys = _maybe_pmap_rng_key(rng_key)
+    rng_keys = _maybe_pmap_rng_key(rng_key)  # pytype: disable=wrong-arg-types  # numpy-scalars
     features = _maybe_pmap_data(features)
     return _maybe_restack_from_pmap(
         self.jitted_predict(
@@ -535,7 +535,7 @@ class BaselineModelChunked(BaselineModel):
   def _init_mp_state(self, features_list: List[List[_FeaturesChunked]],
                      rng_key: _Array):
     def _empty_mp_state():
-      return nets.MessagePassingStateChunked(
+      return nets.MessagePassingStateChunked(  # pytype: disable=wrong-arg-types  # numpy-scalars
           inputs=None, hints=None, is_first=None,
           hint_preds=None, hiddens=None, lstm_state=None)
     empty_mp_states = [[_empty_mp_state() for _ in f] for f in features_list]
@@ -634,7 +634,7 @@ class BaselineModelChunked(BaselineModel):
     # The next, commented out line, should be used for proper state keeping.
     # mp_state = self.mp_states[length_index][algorithm_index]
     mp_state = self.init_mp_states[length_index][algorithm_index]
-    rng_keys = _maybe_pmap_rng_key(rng_key)
+    rng_keys = _maybe_pmap_rng_key(rng_key)  # pytype: disable=wrong-arg-types  # numpy-scalars
     feedback = _maybe_pmap_reshape(feedback, split_axis=1)
     mp_state = _maybe_pmap_reshape(mp_state, split_axis=0)
 
@@ -656,7 +656,7 @@ class BaselineModelChunked(BaselineModel):
     # The next, commented out line, should be used for proper state keeping.
     # mp_state = self.mp_states[length_index][algorithm_index]
     mp_state = self.init_mp_states[length_index][algorithm_index]
-    rng_keys = _maybe_pmap_rng_key(rng_key)
+    rng_keys = _maybe_pmap_rng_key(rng_key)  # pytype: disable=wrong-arg-types  # numpy-scalars
     feedback = _maybe_pmap_reshape(feedback, split_axis=1)
     mp_state = _maybe_pmap_reshape(mp_state, split_axis=0)
     loss, self._device_params, self._device_opt_state, mp_state = (

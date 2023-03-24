@@ -96,7 +96,7 @@ class GAT(Processor):
     self.residual = residual
     self.use_ln = use_ln
 
-  def __call__(
+  def __call__(  # pytype: disable=signature-mismatch  # numpy-scalars
       self,
       node_fts: _Array,
       edge_fts: _Array,
@@ -158,7 +158,7 @@ class GAT(Processor):
       ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
       ret = ln(ret)
 
-    return ret, None
+    return ret, None  # pytype: disable=bad-return-type  # numpy-scalars
 
 
 class GATFull(GAT):
@@ -200,7 +200,7 @@ class GATv2(Processor):
     self.residual = residual
     self.use_ln = use_ln
 
-  def __call__(
+  def __call__(  # pytype: disable=signature-mismatch  # numpy-scalars
       self,
       node_fts: _Array,
       edge_fts: _Array,
@@ -286,7 +286,7 @@ class GATv2(Processor):
       ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
       ret = ln(ret)
 
-    return ret, None
+    return ret, None  # pytype: disable=bad-return-type  # numpy-scalars
 
 
 class GATv2Full(GATv2):
@@ -359,7 +359,7 @@ class PGN(Processor):
     self.nb_triplet_fts = nb_triplet_fts
     self.gated = gated
 
-  def __call__(
+  def __call__(  # pytype: disable=signature-mismatch  # numpy-scalars
       self,
       node_fts: _Array,
       edge_fts: _Array,
@@ -441,7 +441,7 @@ class PGN(Processor):
       gate = jax.nn.sigmoid(gate3(jax.nn.relu(gate1(z) + gate2(msgs))))
       ret = ret * gate + hidden * (1-gate)
 
-    return ret, tri_msgs
+    return ret, tri_msgs  # pytype: disable=bad-return-type  # numpy-scalars
 
 
 class DeepSets(PGN):
@@ -526,7 +526,7 @@ class MemNetMasked(Processor):
     # Encoding part: i.e. "I" of the paper.
     self._encodings = _position_encoding(sentence_size, embedding_size)
 
-  def __call__(
+  def __call__(  # pytype: disable=signature-mismatch  # numpy-scalars
       self,
       node_fts: _Array,
       edge_fts: _Array,
@@ -547,7 +547,7 @@ class MemNetMasked(Processor):
 
     # Broadcast hidden state corresponding to graph features across the nodes.
     nxt_hidden = nxt_hidden[:, :-1] + nxt_hidden[:, -1:]
-    return nxt_hidden, None
+    return nxt_hidden, None  # pytype: disable=bad-return-type  # numpy-scalars
 
   def _apply(self, queries: _Array, stories: _Array) -> _Array:
     """Apply Memory Network to the queries and stories.

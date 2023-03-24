@@ -177,13 +177,13 @@ class Net(hk.Module):
         output_preds[outp] = is_not_done * output_preds_cand[outp] + (
             1.0 - is_not_done) * mp_state.output_preds[outp]
 
-    new_mp_state = _MessagePassingScanState(
+    new_mp_state = _MessagePassingScanState(  # pytype: disable=wrong-arg-types  # numpy-scalars
         hint_preds=hint_preds,
         output_preds=output_preds,
         hiddens=hiddens,
         lstm_state=lstm_state)
     # Save memory by not stacking unnecessary fields
-    accum_mp_state = _MessagePassingScanState(
+    accum_mp_state = _MessagePassingScanState(  # pytype: disable=wrong-arg-types  # numpy-scalars
         hint_preds=hint_preds if return_hints else None,
         output_preds=output_preds if return_all_outputs else None,
         hiddens=None, lstm_state=None)
@@ -261,7 +261,7 @@ class Net(hk.Module):
       else:
         lstm_state = None
 
-      mp_state = _MessagePassingScanState(
+      mp_state = _MessagePassingScanState(  # pytype: disable=wrong-arg-types  # numpy-scalars
           hint_preds=None, output_preds=None,
           hiddens=hiddens, lstm_state=lstm_state)
 
@@ -544,10 +544,10 @@ class NetChunked(Net):
         batch_size, nb_nodes, lstm_state,
         spec, encs, decs, repred)
 
-    new_mp_state = MessagePassingStateChunked(
+    new_mp_state = MessagePassingStateChunked(  # pytype: disable=wrong-arg-types  # numpy-scalars
         hiddens=hiddens, lstm_state=lstm_state, hint_preds=hint_preds,
         inputs=nxt_inputs, hints=nxt_hints, is_first=nxt_is_first)
-    mp_output = _MessagePassingOutputChunked(
+    mp_output = _MessagePassingOutputChunked(  # pytype: disable=wrong-arg-types  # numpy-scalars
         hint_preds=hint_preds,
         output_preds=output_preds)
     return new_mp_state, mp_output
@@ -714,6 +714,6 @@ def _expand_to(x: _Array, y: _Array) -> _Array:
 
 def _is_not_done_broadcast(lengths, i, tensor):
   is_not_done = (lengths > i + 1) * 1.0
-  while len(is_not_done.shape) < len(tensor.shape):
+  while len(is_not_done.shape) < len(tensor.shape):  # pytype: disable=attribute-error  # numpy-scalars
     is_not_done = jnp.expand_dims(is_not_done, -1)
   return is_not_done
