@@ -79,7 +79,7 @@ def output_loss_chunked(truth: _DataPoint, pred: _Array,
   else:
     mask = _expand_and_broadcast_to(is_last, loss)
   total_mask = jnp.maximum(jnp.sum(mask), EPS)
-  return jnp.sum(jnp.where(mask, loss, 0.0)) / total_mask
+  return jnp.sum(jnp.where(mask, loss, 0.0)) / total_mask  # pytype: disable=bad-return-type  # jnp-type
 
 
 def output_loss(truth: _DataPoint, pred: _Array, nb_nodes: int) -> float:
@@ -112,7 +112,7 @@ def output_loss(truth: _DataPoint, pred: _Array, nb_nodes: int) -> float:
     # Compute the cross entropy between doubly stochastic pred and truth_data
     total_loss = jnp.mean(-jnp.sum(truth.data * pred, axis=-1))
 
-  return total_loss
+  return total_loss  # pytype: disable=bad-return-type  # jnp-type
 
 
 def hint_loss_chunked(
