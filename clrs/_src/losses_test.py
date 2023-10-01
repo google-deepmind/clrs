@@ -152,7 +152,7 @@ class FullVsChunkLossesTest(parameterized.TestCase):
           nb_nodes=nb_nodes,
       )
 
-      full_preds = pred[1:]
+      full_preds = list(pred[1:])
       full_hint_loss = losses.hint_loss(
           truth=_mask_datapoint(truth_full, 1, t_axis=0),
           preds=full_preds,

@@ -37,11 +37,11 @@ class EvaluationTest(absltest.TestCase):
     perm = probing.DataPoint(name='test',
                              type_=specs.Type.PERMUTATION_POINTER,
                              location=specs.Location.NODE,
-                             data=jax.nn.one_hot(pred, n))
+                             data=np.asarray(jax.nn.one_hot(pred, n)))
     mask = probing.DataPoint(name='test_mask',
                              type_=specs.Type.MASK_ONE,
                              location=specs.Location.NODE,
-                             data=jax.nn.one_hot(heads, n))
+                             data=np.asarray(jax.nn.one_hot(heads, n)))
     output = evaluation.fuse_perm_and_mask(perm=perm, mask=mask)
     expected_output = np.array(pred)
     expected_output[np.arange(b), heads] = heads
