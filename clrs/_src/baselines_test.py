@@ -119,9 +119,9 @@ class BaselinesTest(parameterized.TestCase):
           spec, dummy_trajectory=full_batches[0], **common_args)
       b_full.init(full_batches[0].features, seed=42)  # pytype: disable=wrong-arg-types  # jax-ndarray
       full_params = b_full.params
-      full_loss_0 = b_full.feedback(rng_key, full_batches[0])
+      full_loss_0 = b_full.feedback(rng_key, full_batches[0])  # pytype: disable=wrong-arg-types
       b_full.params = full_params
-      full_loss_1 = b_full.feedback(rng_key, full_batches[1])
+      full_loss_1 = b_full.feedback(rng_key, full_batches[1])  # pytype: disable=wrong-arg-types
       new_full_params = b_full.params
 
       b_chunked = baselines.BaselineModelChunked(
@@ -130,13 +130,13 @@ class BaselinesTest(parameterized.TestCase):
       chunked_params = b_chunked.params
       jax.tree_util.tree_map(np.testing.assert_array_equal, full_params,
                              chunked_params)
-      chunked_loss_0 = b_chunked.feedback(rng_key, chunked_batches[0])
+      chunked_loss_0 = b_chunked.feedback(rng_key, chunked_batches[0])  # pytype: disable=wrong-arg-types
       b_chunked.params = chunked_params
-      chunked_loss_1 = b_chunked.feedback(rng_key, chunked_batches[1])
+      chunked_loss_1 = b_chunked.feedback(rng_key, chunked_batches[1])  # pytype: disable=wrong-arg-types
       new_chunked_params = b_chunked.params
 
       b_chunked.params = chunked_params
-      double_chunked_loss = b_chunked.feedback(rng_key, double_chunk_batch)
+      double_chunked_loss = b_chunked.feedback(rng_key, double_chunk_batch)  # pytype: disable=wrong-arg-types
 
     # Test that losses match
     np.testing.assert_allclose(full_loss_0, chunked_loss_0, rtol=1e-4)
@@ -190,16 +190,16 @@ class BaselinesTest(parameterized.TestCase):
       multi_losses = []
 
       single_params.append(copy.deepcopy(b_single.params))
-      single_losses.append(b_single.feedback(rng_key, full_batches[0]))
+      single_losses.append(b_single.feedback(rng_key, full_batches[0]))  # pytype: disable=wrong-arg-types
       single_params.append(copy.deepcopy(b_single.params))
-      single_losses.append(b_single.feedback(rng_key, full_batches_2[0]))
+      single_losses.append(b_single.feedback(rng_key, full_batches_2[0]))  # pytype: disable=wrong-arg-types
       single_params.append(copy.deepcopy(b_single.params))
 
       multi_params.append(copy.deepcopy(b_multi.params))
-      multi_losses.append(b_multi.feedback(rng_key, full_batches[0],
+      multi_losses.append(b_multi.feedback(rng_key, full_batches[0],  # pytype: disable=wrong-arg-types
                                            algorithm_index=0))
       multi_params.append(copy.deepcopy(b_multi.params))
-      multi_losses.append(b_multi.feedback(rng_key, full_batches_2[0],
+      multi_losses.append(b_multi.feedback(rng_key, full_batches_2[0],  # pytype: disable=wrong-arg-types
                                            algorithm_index=0))
       multi_params.append(copy.deepcopy(b_multi.params))
 
@@ -270,7 +270,7 @@ class BaselinesTest(parameterized.TestCase):
     param_changes = []
     for algo_idx in range(len(algos)):
       init_params = copy.deepcopy(baseline.params)
-      _ = baseline.feedback(
+      _ = baseline.feedback(  # pytype: disable=wrong-arg-types
           rng_key,
           batches[algo_idx],
           algorithm_index=(0, algo_idx) if is_chunked else algo_idx)
