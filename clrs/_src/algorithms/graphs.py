@@ -195,6 +195,7 @@ def bfs(A: _Array, s: int) -> _Out:
   reach = np.zeros(A.shape[0])
   pi = np.arange(A.shape[0])
   reach[s] = 1
+  priority = [s]
   while True:
     prev_reach = np.copy(reach)
     probing.push(
@@ -204,12 +205,15 @@ def bfs(A: _Array, s: int) -> _Out:
             'reach_h': np.copy(prev_reach),
             'pi_h': np.copy(pi)
         })
-    for i in range(A.shape[0]):
+    priority_new = []
+    for i in priority + list(set(range(A.shape[0])) - set(priority)):
       for j in range(A.shape[0]):
         if A[i, j] > 0 and prev_reach[i] == 1:
           if pi[j] == j and j != s:
             pi[j] = i
           reach[j] = 1
+          priority_new.append(j)
+    priority = priority_new
     if np.all(reach == prev_reach):
       break
 
