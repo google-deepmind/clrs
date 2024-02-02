@@ -339,7 +339,7 @@ class GATv2FullD2(GATv2):
             adj_mat=adj_mat,
             hidden=hidden
         )
-        emb_values.append(cell_embedding)
+        emb_values.append(cell_embedding[0])
       ret_nodes.append(
           jnp.mean(jnp.stack(emb_values, axis=0), axis=0)
       )
