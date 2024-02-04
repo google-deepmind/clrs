@@ -428,12 +428,22 @@ class PGN(Processor):
   ) -> _Array:
     """MPNN inference step."""
 
+    # b: batch size, n: number of nodes, h: hidden features
+
+    # node_fts: [B, N, H] 
+    # edge_fts: [B, N, N, H]
+    # graph_fts: [B, H]
+    # adj_mat: [B, N, N]
     b, n, _ = node_fts.shape
     assert edge_fts.shape[:-1] == (b, n, n)
     assert graph_fts.shape[:-1] == (b,)
     assert adj_mat.shape == (b, n, n)
 
-    z = jnp.concatenate([node_fts, hidden], axis=-1)
+    # hidden: [B, N, H] (Note that it is possible for this H to be different)
+
+    # Concatenate along last axis
+    # z^{(t)} = x_{i}^{(t)} || h_{i}^{(t-1)}
+    z = jnp.concatenate([node_fts, hidden], axis=-1) # [B, N, 2*H]
     m_1 = hk.Linear(self.mid_size)
     m_2 = hk.Linear(self.mid_size)
     m_e = hk.Linear(self.mid_size)
@@ -442,10 +452,10 @@ class PGN(Processor):
     o1 = hk.Linear(self.out_size)
     o2 = hk.Linear(self.out_size)
 
-    msg_1 = m_1(z)
-    msg_2 = m_2(z)
-    msg_e = m_e(edge_fts)
-    msg_g = m_g(graph_fts)
+    msg_1 = m_1(z) # [B, N, self.mid_size]
+    msg_2 = m_2(z) # [B, N, self.mid_size]
+    msg_e = m_e(edge_fts) # [B, N, N, self.mid_size]
+    msg_g = m_g(graph_fts) # [B, self.mid_size]
 
     tri_msgs = None
 
@@ -454,22 +464,37 @@ class PGN(Processor):
       triplets = get_triplet_msgs(z, edge_fts, graph_fts, self.nb_triplet_fts)
 
       o3 = hk.Linear(self.out_size)
-      tri_msgs = o3(jnp.max(triplets, axis=1))  # (B, N, N, H)
+      tri_msgs = o3(jnp.max(triplets, axis=1))  # [B, N, N, H]
 
       if self.activation is not None:
         tri_msgs = self.activation(tri_msgs)
 
+    # The partial messages are aggregated by summing them
     msgs = (
-        jnp.expand_dims(msg_1, axis=1) + jnp.expand_dims(msg_2, axis=2) +
-        msg_e + jnp.expand_dims(msg_g, axis=(1, 2)))
+        jnp.expand_dims(msg_1, axis=1) + # [B, 1, N, self.mid_size]
+        jnp.expand_dims(msg_2, axis=2) + # [B, N, 1, self.mid_size]
+        msg_e + # [B, N, N, self.mid_size]
+        jnp.expand_dims(msg_g, axis=(1, 2))) # [B, 1, 1, self.mid_size]
 
     if self._msgs_mlp_sizes is not None:
+      # self._msgs_mlp_sizes is a tuple, e.g. [64, 128, 16], with the output dimesions
+      # for a series of Linear layers, followed by their respective activations
       msgs = hk.nets.MLP(self._msgs_mlp_sizes)(jax.nn.relu(msgs))
 
+    # Additional activation
     if self.mid_act is not None:
       msgs = self.mid_act(msgs)
 
+    # At this point, messages contains the operation f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)}),
+    # where f_{m} is the message function (MLP with non-linearities)
+
+    # Computes m_{i}^{(t)} as a reduction over f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)}), 
+    # e.g. m_{i}^{(t)}=max_{1 \leq j \leq n}f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)})
     if self.reduction == jnp.mean:
+      # msgs: [B, N, N, self.mid_size], adj_mat: [B, N, N, 1]
+      # If (i,j) \not \in adj_mat, then msgs[i,j,:]=0,  therefore,
+      # when performing the sum over the axis=1, the reduction is 
+      # applied in a one-hop neighborhood basis 
       msgs = jnp.sum(msgs * jnp.expand_dims(adj_mat, -1), axis=1)
       msgs = msgs / jnp.sum(adj_mat, axis=-1, keepdims=True)
     elif self.reduction == jnp.max:
@@ -480,14 +505,17 @@ class PGN(Processor):
     else:
       msgs = self.reduction(msgs * jnp.expand_dims(adj_mat, -1), axis=1)
 
+    # Computation of h_{i}^{(t)}=f_{r}(z_{i}^{(t)}, m_{i}^{(t)})
     h_1 = o1(z)
     h_2 = o2(msgs)
 
+    # h_{i}^{(t)} = Linear(z_{i}^{(t)}) + Linear(m_{i}^{(t)})
     ret = h_1 + h_2
-
+    
     if self.activation is not None:
       ret = self.activation(ret)
 
+    # Include LayerNorm if needed
     if self.use_ln:
       ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
       ret = ln(ret)
@@ -517,6 +545,7 @@ class MPNN(PGN):
 
   def __call__(self, node_fts: _Array, edge_fts: _Array, graph_fts: _Array,
                adj_mat: _Array, hidden: _Array, **unused_kwargs) -> _Array:
+    # The adjacency matrix has all its entries set to 1: the graph is fully-connected
     adj_mat = jnp.ones_like(adj_mat)
     return super().__call__(node_fts, edge_fts, graph_fts, adj_mat, hidden)
 
