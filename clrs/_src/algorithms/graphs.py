@@ -72,6 +72,9 @@ def dfs(A: _Array) -> _Out:
   f = np.zeros(A.shape[0])
   s_prev = np.arange(A.shape[0])
   time = 0
+  shuffled = np.arange(A.shape[0])
+  np.random.shuffle(shuffled)
+  print("You are running a modified CLRS version!")
   for s in range(A.shape[0]):
     if color[s] == 0:
       s_last = s
@@ -113,7 +116,7 @@ def dfs(A: _Array) -> _Out:
                   'time': time
               })
 
-        for v in range(A.shape[0]):
+        for v in shuffled:
           if A[u, v] != 0:
             if color[v] == 0:
               pi[v] = u
