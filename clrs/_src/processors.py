@@ -487,6 +487,19 @@ class PGN(Processor):
 
     # At this point, messages contains the operation f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)}),
     # where f_{m} is the message function (MLP with non-linearities)
+      
+    """
+    # This part mimics the steps after between the reduction of the messages and the application
+    # of the non-linearity and layer-norm.
+    z_0 = z
+    h_2_temp = o2(msgs) * jnp.expand_dims(adj_mat, -1) 
+    for i in range(n):
+      h_1_temp = o1(z_0)
+      z_0 = h_1_temp +  h_2_temp[:,i,:,:]
+
+    # Alternative implementation using functional programming
+    z_temp_last, z_all = jax.lax.scan(lambda z_temp, msg_temp: o1(z_temp) + msg_temp, z_0, jnp.transpose(h_2_temp, (1, 0, 2, 3)))
+    """
 
     # Computes m_{i}^{(t)} as a reduction over f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)}), 
     # e.g. m_{i}^{(t)}=max_{1 \leq j \leq n}f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)})
