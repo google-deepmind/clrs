@@ -22,6 +22,7 @@ import chex
 import haiku as hk
 import jax
 import jax.numpy as jnp
+from jax import random
 import numpy as np
 
 
@@ -487,19 +488,57 @@ class PGN(Processor):
 
     # At this point, messages contains the operation f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)}),
     # where f_{m} is the message function (MLP with non-linearities)
-      
-    """
-    # This part mimics the steps after between the reduction of the messages and the application
-    # of the non-linearity and layer-norm.
-    z_0 = z
-    h_2_temp = o2(msgs) * jnp.expand_dims(adj_mat, -1) 
-    for i in range(n):
-      h_1_temp = o1(z_0)
-      z_0 = h_1_temp +  h_2_temp[:,i,:,:]
 
-    # Alternative implementation using functional programming
-    z_temp_last, z_all = jax.lax.scan(lambda z_temp, msg_temp: o1(z_temp) + msg_temp, z_0, jnp.transpose(h_2_temp, (1, 0, 2, 3)))
-    """
+    # msgs - [B, N, N, H]
+    num_messages_sampled = 2
+
+    # Generate random indices
+    # random_indices shape will be [B, N, 2], with values in range [0, N)
+    key, subkey = random.split(key)
+    random_indices = random.randint(subkey, (b, num_messages_sampled, n), minval=0, maxval=2)
+
+    # Gather the elements from input_tensor based on the generated random indices
+    # You need to create a meshgrid for B and N dimensions to use in advanced indexing
+    b_indices, n_indices = jnp.meshgrid(jnp.arange(b), jnp.arange(n), indexing='ij')
+
+    # sampled_msgs [B, N, 2, H]
+    sampled_msgs = msgs[b_indices, random_indices, n_indices, :]
+
+    # Computes m_{i}^{(t)} as a reduction over f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)}), 
+    # e.g. m_{i}^{(t)}=max_{1 \leq j \leq n}f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)})
+    if self.reduction == jnp.mean:
+      # msgs: [B, N, N, self.mid_size], adj_mat: [B, N, N, 1]
+      # If (i,j) \not \in adj_mat, then msgs[i,j,:]=0,  therefore,
+      # when performing the sum over the axis=1, the reduction is 
+      # applied in a one-hop neighborhood basis 
+      sampled_msgs_red = jnp.sum(sampled_msgs * jnp.expand_dims(adj_mat, -1), axis=1)
+      sampled_msgs_red = sampled_msgs_red / num_messages_sampled
+    elif self.reduction == jnp.max:
+      maxarg = jnp.where(jnp.expand_dims(adj_mat, -1),
+                         sampled_msgs,
+                         -BIG_NUMBER)
+      sampled_msgs_red = jnp.max(maxarg, axis=1)
+    else:
+      sampled_msgs_red = self.reduction(sampled_msgs * jnp.expand_dims(adj_mat, -1), axis=1)
+
+    # sampled_msgs_red - [B, N, H]
+
+    # Computation of h_{i}^{(t)}=f_{r}(z_{i}^{(t)}, m_{i}^{(t)})
+    h_1 = o1(z)
+    h_2 = o2(sampled_msgs_red)
+
+    # h_{i}^{(t)} = Linear(z_{i}^{(t)}) + Linear(m_{i}^{(t)})
+    ret_loss_1 = h_1 + h_2
+
+    h_1 = o1(z)
+    h_2 = o2(sampled_msgs[:,:,0,:]) # [B, N, H]
+
+    ret_loss_2_partial = h_1 + h_2
+
+    h_1 = o1(ret_loss_2_partial)
+    h_2 = o2(sampled_msgs[:,:,1,:]) # [B, N, H]
+
+    ret_loss_2 = h_1 + h_2
 
     # Computes m_{i}^{(t)} as a reduction over f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)}), 
     # e.g. m_{i}^{(t)}=max_{1 \leq j \leq n}f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)})
