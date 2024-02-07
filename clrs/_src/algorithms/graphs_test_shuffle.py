@@ -18,4 +18,4 @@ UNDIRECTED = np.array([
 ])
 out, probes = graphs.dfs(DIRECTED)
 print(out)
-print(probes)
+#print(probes)
