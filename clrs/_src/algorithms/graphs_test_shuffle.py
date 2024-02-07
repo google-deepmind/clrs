@@ -16,5 +16,6 @@ UNDIRECTED = np.array([
     [0, 1, 1, 0, 1],
     [1, 1, 0, 1, 0],
 ])
-out, _ = graphs.dfs(DIRECTED)
+out, probes = graphs.dfs(DIRECTED)
 print(out)
+print(probes)

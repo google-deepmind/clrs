@@ -53,53 +53,40 @@ def dfs(A: _Array) -> _Out:
   """Depth-first search (Moore, 1959)."""
 
   chex.assert_rank(A, 2)
-  probes = probing.initialize(specs.SPECS['dfs'])
+  probeslist = []
+  pies = []
 
-  A_pos = np.arange(A.shape[0])
+  NUM_SOLUTIONS = 10
 
-  probing.push(
-      probes,
-      specs.Stage.INPUT,
-      next_probe={
-          'pos': np.copy(A_pos) * 1.0 / A.shape[0],
-          'A': np.copy(A),
-          'adj': probing.graph(np.copy(A))
-      })
+  for i in range(NUM_SOLUTIONS):
 
-  color = np.zeros(A.shape[0], dtype=np.int32)
-  pi = np.arange(A.shape[0])
-  d = np.zeros(A.shape[0])
-  f = np.zeros(A.shape[0])
-  s_prev = np.arange(A.shape[0])
-  time = 0
-  shuffled = np.arange(A.shape[0])
-  np.random.shuffle(shuffled)
-  print("You are running a modified CLRS version!")
-  for s in range(A.shape[0]):
-    if color[s] == 0:
-      s_last = s
-      u = s
-      v = s
+      probes = probing.initialize(specs.SPECS['dfs'])
+
+      A_pos = np.arange(A.shape[0])
+
       probing.push(
           probes,
-          specs.Stage.HINT,
+          specs.Stage.INPUT,
           next_probe={
-              'pi_h': np.copy(pi),
-              'color': probing.array_cat(color, 3),
-              'd': np.copy(d),
-              'f': np.copy(f),
-              's_prev': np.copy(s_prev),
-              's': probing.mask_one(s, A.shape[0]),
-              'u': probing.mask_one(u, A.shape[0]),
-              'v': probing.mask_one(v, A.shape[0]),
-              's_last': probing.mask_one(s_last, A.shape[0]),
-              'time': time
+              'pos': np.copy(A_pos) * 1.0 / A.shape[0],
+              'A': np.copy(A),
+              'adj': probing.graph(np.copy(A))
           })
-      while True:
-        if color[u] == 0 or d[u] == 0.0:
-          time += 0.01
-          d[u] = time
-          color[u] = 1
+
+      color = np.zeros(A.shape[0], dtype=np.int32)
+      pi = np.arange(A.shape[0])
+      d = np.zeros(A.shape[0])
+      f = np.zeros(A.shape[0])
+      s_prev = np.arange(A.shape[0])
+      time = 0
+      shuffled = np.arange(A.shape[0])
+      np.random.shuffle(shuffled)
+      print("You are running a modified CLRS version!")
+      for s in range(A.shape[0]):
+        if color[s] == 0:
+          s_last = s
+          u = s
+          v = s
           probing.push(
               probes,
               specs.Stage.HINT,
@@ -115,14 +102,56 @@ def dfs(A: _Array) -> _Out:
                   's_last': probing.mask_one(s_last, A.shape[0]),
                   'time': time
               })
+          while True:
+            if color[u] == 0 or d[u] == 0.0:
+              time += 0.01
+              d[u] = time
+              color[u] = 1
+              probing.push(
+                  probes,
+                  specs.Stage.HINT,
+                  next_probe={
+                      'pi_h': np.copy(pi),
+                      'color': probing.array_cat(color, 3),
+                      'd': np.copy(d),
+                      'f': np.copy(f),
+                      's_prev': np.copy(s_prev),
+                      's': probing.mask_one(s, A.shape[0]),
+                      'u': probing.mask_one(u, A.shape[0]),
+                      'v': probing.mask_one(v, A.shape[0]),
+                      's_last': probing.mask_one(s_last, A.shape[0]),
+                      'time': time
+                  })
 
-        for v in shuffled:
-          if A[u, v] != 0:
-            if color[v] == 0:
-              pi[v] = u
-              color[v] = 1
-              s_prev[v] = s_last
-              s_last = v
+            for v in shuffled:
+              if A[u, v] != 0:
+                if color[v] == 0:
+                  pi[v] = u
+                  color[v] = 1
+                  s_prev[v] = s_last
+                  s_last = v
+
+                  probing.push(
+                      probes,
+                      specs.Stage.HINT,
+                      next_probe={
+                          'pi_h': np.copy(pi),
+                          'color': probing.array_cat(color, 3),
+                          'd': np.copy(d),
+                          'f': np.copy(f),
+                          's_prev': np.copy(s_prev),
+                          's': probing.mask_one(s, A.shape[0]),
+                          'u': probing.mask_one(u, A.shape[0]),
+                          'v': probing.mask_one(v, A.shape[0]),
+                          's_last': probing.mask_one(s_last, A.shape[0]),
+                          'time': time
+                      })
+                  break
+
+            if s_last == u:
+              color[u] = 2
+              time += 0.01
+              f[u] = time
 
               probing.push(
                   probes,
@@ -139,42 +168,23 @@ def dfs(A: _Array) -> _Out:
                       's_last': probing.mask_one(s_last, A.shape[0]),
                       'time': time
                   })
-              break
 
-        if s_last == u:
-          color[u] = 2
-          time += 0.01
-          f[u] = time
+              if s_prev[u] == u:
+                assert s_prev[s_last] == s_last
+                break
+              pr = s_prev[s_last]
+              s_prev[s_last] = s_last
+              s_last = pr
 
-          probing.push(
-              probes,
-              specs.Stage.HINT,
-              next_probe={
-                  'pi_h': np.copy(pi),
-                  'color': probing.array_cat(color, 3),
-                  'd': np.copy(d),
-                  'f': np.copy(f),
-                  's_prev': np.copy(s_prev),
-                  's': probing.mask_one(s, A.shape[0]),
-                  'u': probing.mask_one(u, A.shape[0]),
-                  'v': probing.mask_one(v, A.shape[0]),
-                  's_last': probing.mask_one(s_last, A.shape[0]),
-                  'time': time
-              })
+            u = s_last
 
-          if s_prev[u] == u:
-            assert s_prev[s_last] == s_last
-            break
-          pr = s_prev[s_last]
-          s_prev[s_last] = s_last
-          s_last = pr
+      probing.push(probes, specs.Stage.OUTPUT, next_probe={'pi': np.copy(pi)})
+      probing.finalize(probes)
 
-        u = s_last
+      pies.append(pi)
+      probeslist.append(probes)
 
-  probing.push(probes, specs.Stage.OUTPUT, next_probe={'pi': np.copy(pi)})
-  probing.finalize(probes)
-
-  return pi, probes
+  return pies, probeslist
 
 
 def bfs(A: _Array, s: int) -> _Out:
