@@ -25,6 +25,7 @@ import jax.numpy as jnp
 from jax import random
 import numpy as np
 
+from clrs._src.utils import sample_msgs
 
 _Array = chex.Array
 _Fn = Callable[..., Any]
@@ -453,6 +454,11 @@ class PGN(Processor):
     o1 = hk.Linear(self.out_size)
     o2 = hk.Linear(self.out_size)
 
+    if self.gated:
+      gate1 = hk.Linear(self.out_size)
+      gate2 = hk.Linear(self.out_size)
+      gate3 = hk.Linear(self.out_size, b_init=hk.initializers.Constant(-3))
+
     msg_1 = m_1(z) # [B, N, self.mid_size]
     msg_2 = m_2(z) # [B, N, self.mid_size]
     msg_e = m_e(edge_fts) # [B, N, N, self.mid_size]
@@ -488,57 +494,85 @@ class PGN(Processor):
 
     # At this point, messages contains the operation f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)}),
     # where f_{m} is the message function (MLP with non-linearities)
+      
+    ###############
+    ## The following code includes the operations needed for the computation of the
+    ## regularized loss.
+    ###############
 
-    # msgs - [B, N, N, H]
-    num_messages_sampled = 2
-
-    # Generate random indices
-    # random_indices shape will be [B, N, 2], with values in range [0, N)
-    key, subkey = random.split(key)
-    random_indices = random.randint(subkey, (b, num_messages_sampled, n), minval=0, maxval=2)
-
-    # Gather the elements from input_tensor based on the generated random indices
-    # You need to create a meshgrid for B and N dimensions to use in advanced indexing
-    b_indices, n_indices = jnp.meshgrid(jnp.arange(b), jnp.arange(n), indexing='ij')
-
-    # sampled_msgs [B, N, 2, H]
-    sampled_msgs = msgs[b_indices, random_indices, n_indices, :]
+    # Number of messages to sample
+    num_samples_per_node = 2
+    # Randomly sample incoming messages for each node. sample_msgs has resulting shape [B, 2, N, H]
+    sampled_msgs = sample_msgs(msgs, adj_mat, num_samples_per_node)
 
     # Computes m_{i}^{(t)} as a reduction over f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)}), 
     # e.g. m_{i}^{(t)}=max_{1 \leq j \leq n}f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)})
     if self.reduction == jnp.mean:
-      # msgs: [B, N, N, self.mid_size], adj_mat: [B, N, N, 1]
-      # If (i,j) \not \in adj_mat, then msgs[i,j,:]=0,  therefore,
-      # when performing the sum over the axis=1, the reduction is 
-      # applied in a one-hop neighborhood basis 
-      sampled_msgs_red = jnp.sum(sampled_msgs * jnp.expand_dims(adj_mat, -1), axis=1)
-      sampled_msgs_red = sampled_msgs_red / num_messages_sampled
+      # sampled_msgs: [B, num_samples_per_node, N, H]
+      # Note that there is no need to multiply by the adjacency matrix
+      # as the incoming messages will be sampled from nodes in the 
+      # neighbourhood of each node
+      sampled_msgs_red = jnp.sum(sampled_msgs, axis=1)
+      sampled_msgs_red = sampled_msgs_red / num_samples_per_node
     elif self.reduction == jnp.max:
-      maxarg = jnp.where(jnp.expand_dims(adj_mat, -1),
-                         sampled_msgs,
-                         -BIG_NUMBER)
-      sampled_msgs_red = jnp.max(maxarg, axis=1)
+      sampled_msgs_red = jnp.max(sampled_msgs, axis=1)
     else:
-      sampled_msgs_red = self.reduction(sampled_msgs * jnp.expand_dims(adj_mat, -1), axis=1)
+      sampled_msgs_red = self.reduction(sampled_msgs, axis=1)
 
     # sampled_msgs_red - [B, N, H]
 
     # Computation of h_{i}^{(t)}=f_{r}(z_{i}^{(t)}, m_{i}^{(t)})
     h_1 = o1(z)
     h_2 = o2(sampled_msgs_red)
-
     # h_{i}^{(t)} = Linear(z_{i}^{(t)}) + Linear(m_{i}^{(t)})
     ret_loss_1 = h_1 + h_2
 
+    # Include LayerNorm if needed
+    if self.use_ln:
+      ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
+      ret_loss_1 = ln(ret_loss_1)
+
+    if self.gated:
+      gate = jax.nn.sigmoid(gate3(jax.nn.relu(gate1(z) + gate2(sampled_msgs_red))))
+      ret_loss_1 = ret_loss_1 * gate + hidden * (1-gate)
+
+    # Computation of h_{i}^{(t)}=f_{r}(f_{r}(...))
     h_1 = o1(z)
-    h_2 = o2(sampled_msgs[:,:,0,:]) # [B, N, H]
+    msg_1 = sampled_msgs[:,0,:,:]
+    h_2 = o2(msg_1) # [B, N, H]
 
-    ret_loss_2_partial = h_1 + h_2
+    next_hidden = h_1 + h_2
 
-    h_1 = o1(ret_loss_2_partial)
-    h_2 = o2(sampled_msgs[:,:,1,:]) # [B, N, H]
+    # Include LayerNorm if needed
+    if self.use_ln:
+      ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
+      next_hidden = ln(next_hidden)
+
+    if self.gated:
+      gate = jax.nn.sigmoid(gate3(jax.nn.relu(gate1(z) + gate2(msg_1))))
+      next_hidden = next_hidden * gate + hidden * (1-gate)
+
+    next_z = jnp.concatenate([node_fts, next_hidden], axis=-1)
+    h_1 = o1(next_z)
+    msg_2 = sampled_msgs[:,1,:,:]
+    h_2 = o2(msg_2) # [B, N, H]
 
     ret_loss_2 = h_1 + h_2
+
+    # Include LayerNorm if needed
+    if self.use_ln:
+      ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
+      ret_loss_2 = ln(ret_loss_2)
+
+    if self.gated:
+      gate = jax.nn.sigmoid(gate3(jax.nn.relu(gate1(next_z) + gate2(msg_2))))
+      ret_loss_2 = ret_loss_2 * gate + next_hidden * (1-gate)
+
+    mse_loss = jnp.mean((ret_loss_1 - ret_loss_2)**2)
+
+    ###############
+    ## End of code for computing the regularized loss.
+    ###############
 
     # Computes m_{i}^{(t)} as a reduction over f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)}), 
     # e.g. m_{i}^{(t)}=max_{1 \leq j \leq n}f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)})
@@ -573,9 +607,6 @@ class PGN(Processor):
       ret = ln(ret)
 
     if self.gated:
-      gate1 = hk.Linear(self.out_size)
-      gate2 = hk.Linear(self.out_size)
-      gate3 = hk.Linear(self.out_size, b_init=hk.initializers.Constant(-3))
       gate = jax.nn.sigmoid(gate3(jax.nn.relu(gate1(z) + gate2(msgs))))
       ret = ret * gate + hidden * (1-gate)
 
