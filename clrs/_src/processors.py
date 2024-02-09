@@ -492,6 +492,36 @@ class PGN(Processor):
     if self.mid_act is not None:
       msgs = self.mid_act(msgs)
 
+    # Computation of h_{i}^{(t)}=f_{r}(z_{i}^{(t)}, m_{i}^{(t)})
+    def compute_node_update(hidden, msgs, z):
+      h_1 = o1(z)
+      h_2 = o2(msgs)
+      # h_{i}^{(t)} = Linear(z_{i}^{(t)}) + Linear(m_{i}^{(t)})
+      ret = h_1 + h_2
+
+      if self.activation is not None:
+        ret = self.activation(ret)
+
+      # Include LayerNorm if needed
+      if self.use_ln:
+        ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
+        ret = ln(ret)
+
+      if self.gated:
+        gate = jax.nn.sigmoid(gate3(jax.nn.relu(gate1(z) + gate2(msgs))))
+        ret = ret * gate + hidden * (1-gate)
+
+      return ret
+    
+    # Format compatible with jax.lax.scan. This method is created to prevent
+    # redundant concatenations of the hidden state with the node features,
+    # in comparison with the method compute_node_update which receives z directly
+    def compute_node_update_scan(hidden, msgs):
+      z = jnp.concatenate([node_fts, hidden], axis=-1) # [B, N, 2*H]
+      # The hidden state of the node is propagated within the carry. The second
+      # return is None as it is not used, and it is only required by hk.scan
+      return compute_node_update(hidden, msgs, z), None
+
     # At this point, messages contains the operation f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)}),
     # where f_{m} is the message function (MLP with non-linearities)
       
@@ -508,75 +538,28 @@ class PGN(Processor):
     # Computes m_{i}^{(t)} as a reduction over f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)}), 
     # e.g. m_{i}^{(t)}=max_{1 \leq j \leq n}f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)})
     if self.reduction == jnp.mean:
-      # sampled_msgs: [B, num_samples_per_node, N, H]
+    # sampled_msgs: [B, num_samples_per_node, N, H], sampled_msgs_red: [B, N, H]
       # Note that there is no need to multiply by the adjacency matrix
       # as the incoming messages will be sampled from nodes in the 
       # neighbourhood of each node
-      sampled_msgs_red = jnp.sum(sampled_msgs, axis=1)
-      sampled_msgs_red = sampled_msgs_red / num_samples_per_node
+      sampled_msgs_reduced = jnp.sum(sampled_msgs, axis=1)
+      sampled_msgs_reduced = sampled_msgs_reduced / num_samples_per_node
     elif self.reduction == jnp.max:
-      sampled_msgs_red = jnp.max(sampled_msgs, axis=1)
+      sampled_msgs_reduced = jnp.max(sampled_msgs, axis=1)
     else:
-      sampled_msgs_red = self.reduction(sampled_msgs, axis=1)
+      sampled_msgs_reduced = self.reduction(sampled_msgs, axis=1)
 
-    # sampled_msgs_red - [B, N, H]
-
-    # Computation of h_{i}^{(t)}=f_{r}(z_{i}^{(t)}, m_{i}^{(t)})
-    h_1 = o1(z)
-    h_2 = o2(sampled_msgs_red)
-    # h_{i}^{(t)} = Linear(z_{i}^{(t)}) + Linear(m_{i}^{(t)})
-    ret_loss_1 = h_1 + h_2
-
-    if self.activation is not None:
-      ret_loss_1 = self.activation(ret_loss_1)
-
-    # Include LayerNorm if needed
-    if self.use_ln:
-      ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
-      ret_loss_1 = ln(ret_loss_1)
-
-    if self.gated:
-      gate = jax.nn.sigmoid(gate3(jax.nn.relu(gate1(z) + gate2(sampled_msgs_red))))
-      ret_loss_1 = ret_loss_1 * gate + hidden * (1-gate)
-
-    # Computation of h_{i}^{(t)}=f_{r}(f_{r}(...))
-    h_1 = o1(z)
-    msg_1 = sampled_msgs[:,0,:,:]
-    h_2 = o2(msg_1) # [B, N, H]
-
-    next_hidden = h_1 + h_2
-
-    if self.activation is not None:
-      next_hidden = self.activation(next_hidden)
-
-    # Include LayerNorm if needed
-    if self.use_ln:
-      ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
-      next_hidden = ln(next_hidden)
-
-    if self.gated:
-      gate = jax.nn.sigmoid(gate3(jax.nn.relu(gate1(z) + gate2(msg_1))))
-      next_hidden = next_hidden * gate + hidden * (1-gate)
-
-    next_z = jnp.concatenate([node_fts, next_hidden], axis=-1)
-    h_1 = o1(next_z)
-    msg_2 = sampled_msgs[:,1,:,:]
-    h_2 = o2(msg_2) # [B, N, H]
-
-    ret_loss_2 = h_1 + h_2
-
-    if self.activation is not None:
-      ret_loss_2 = self.activation(ret_loss_2)
-
-    # Include LayerNorm if needed
-    if self.use_ln:
-      ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
-      ret_loss_2 = ln(ret_loss_2)
-
-    if self.gated:
-      gate = jax.nn.sigmoid(gate3(jax.nn.relu(gate1(next_z) + gate2(msg_2))))
-      ret_loss_2 = ret_loss_2 * gate + next_hidden * (1-gate)
-
+    # Node update for the aggregated sampled messages (first component of the loss)
+    ret_loss_1 = compute_node_update(hidden, sampled_msgs_reduced, z)
+    # The shape of sample messages is [B, num_samples_per_node, N, H], and the arguments
+    # in jax.lax.scan are passed through the leading dimension
+    sampled_msgs = jnp.transpose(sampled_msgs, (1, 0, 2, 3))
+    # The first update is different to prevent a redundant concatenation of the node
+    # features.
+    next_hidden = compute_node_update(hidden, sampled_msgs[0], z)
+    # Iterative updates for the sampled messages
+    ret_loss_2, _ = hk.scan(compute_node_update_scan, next_hidden, sampled_msgs[1:], num_samples_per_node-1)
+    # Regularization term penalising the violation of the associativity in the node update
     mse_loss = jnp.mean((ret_loss_1 - ret_loss_2)**2)
 
     ###############
@@ -601,23 +584,7 @@ class PGN(Processor):
       msgs = self.reduction(msgs * jnp.expand_dims(adj_mat, -1), axis=1)
 
     # Computation of h_{i}^{(t)}=f_{r}(z_{i}^{(t)}, m_{i}^{(t)})
-    h_1 = o1(z)
-    h_2 = o2(msgs)
-
-    # h_{i}^{(t)} = Linear(z_{i}^{(t)}) + Linear(m_{i}^{(t)})
-    ret = h_1 + h_2
-    
-    if self.activation is not None:
-      ret = self.activation(ret)
-
-    # Include LayerNorm if needed
-    if self.use_ln:
-      ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
-      ret = ln(ret)
-
-    if self.gated:
-      gate = jax.nn.sigmoid(gate3(jax.nn.relu(gate1(z) + gate2(msgs))))
-      ret = ret * gate + hidden * (1-gate)
+    ret = compute_node_update(hidden, msgs, z)
 
     return ret, tri_msgs, mse_loss  # pytype: disable=bad-return-type  # numpy-scalars
 
