@@ -527,6 +527,9 @@ class PGN(Processor):
     # h_{i}^{(t)} = Linear(z_{i}^{(t)}) + Linear(m_{i}^{(t)})
     ret_loss_1 = h_1 + h_2
 
+    if self.activation is not None:
+      ret_loss_1 = self.activation(ret_loss_1)
+
     # Include LayerNorm if needed
     if self.use_ln:
       ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
@@ -543,6 +546,9 @@ class PGN(Processor):
 
     next_hidden = h_1 + h_2
 
+    if self.activation is not None:
+      next_hidden = self.activation(next_hidden)
+
     # Include LayerNorm if needed
     if self.use_ln:
       ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
@@ -558,6 +564,9 @@ class PGN(Processor):
     h_2 = o2(msg_2) # [B, N, H]
 
     ret_loss_2 = h_1 + h_2
+
+    if self.activation is not None:
+      ret_loss_2 = self.activation(ret_loss_2)
 
     # Include LayerNorm if needed
     if self.use_ln:
@@ -610,7 +619,7 @@ class PGN(Processor):
       gate = jax.nn.sigmoid(gate3(jax.nn.relu(gate1(z) + gate2(msgs))))
       ret = ret * gate + hidden * (1-gate)
 
-    return ret, tri_msgs  # pytype: disable=bad-return-type  # numpy-scalars
+    return ret, tri_msgs, mse_loss  # pytype: disable=bad-return-type  # numpy-scalars
 
 
 class DeepSets(PGN):

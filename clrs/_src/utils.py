@@ -34,6 +34,8 @@ def sample_msgs(msgs, adj_mat, num_samples_per_node, seed=0):
     key = random.PRNGKey(seed)  # PRNG key for reproducibility
     key, subkey = random.split(key)
 
+    # hk.next_rng_key() - use this key instead
+
     # Generate random indices
     # random_indices shape will be [B, N, 2], with values in range [0, N)
     random_indices = random.randint(subkey, (b, num_samples_per_node, n), minval=0, maxval=n)
