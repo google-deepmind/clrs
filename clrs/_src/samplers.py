@@ -135,6 +135,7 @@ class Sampler(abc.ABC):
     inputs = _batch_io(inputs)
     outputs = _batch_io(outputs)
     hints, lengths = _batch_hints(hints, min_length)
+    #print(f"Inputs: {inputs}, Outputs: {outputs}, Hints: {hints}, Lengths: {lengths}, Algo: {algorithm}")
     return inputs, outputs, hints, lengths
 
   def next(self, batch_size: Optional[int] = None) -> Feedback:

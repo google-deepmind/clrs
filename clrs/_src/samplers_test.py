@@ -66,7 +66,7 @@ class SamplersTest(parameterized.TestCase):
   def test_end_to_end(self):
     num_samples = 7
     num_nodes = 3
-    sampler, _ = samplers.build_sampler("bfs", num_samples, num_nodes)
+    sampler, _ = samplers.build_sampler("dfs", num_samples, num_nodes)
     feedback = sampler.next()
 
     inputs = feedback.features.inputs

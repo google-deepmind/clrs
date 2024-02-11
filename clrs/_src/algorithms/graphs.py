@@ -184,9 +184,16 @@ def dfs(A: _Array) -> _Out:
       pies.append(pi)
       probeslist.append(probes)
 
-  # combine pies into probability matrix
+  adjs = []
+  for i in range(NUM_SOLUTIONS):
+    adj = np.zeros(A.shape)
+    for j in range(len(pies[0])):
+        adj[j, pies[i][j]] = 1
+    adjs.append(adj)
+  probs = sum(adjs) / NUM_SOLUTIONS
+  print(probs)
 
-  return pies, probeslist
+  return pies, probeslist, probs
 
 
 def bfs(A: _Array, s: int) -> _Out:
@@ -1616,4 +1623,3 @@ def bipartite_matching(A: _Array, n: int, m: int, s: int, t: int) -> _Out:
               'u': probing.mask_one(u, A.shape[0]),
               'phase': 1
           })
-
