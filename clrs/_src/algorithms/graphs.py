@@ -184,7 +184,16 @@ def dfs(A: _Array) -> _Out:
       pies.append(pi)
       probeslist.append(probes)
 
-  return pies, probeslist
+  adjs = []
+  for i in range(NUM_SOLUTIONS):
+    adj = np.zeros(A.shape)
+    for j in range(len(pies[0])):
+        adj[j, pies[i][j]] = 1
+    adjs.append(adj)
+  probs = sum(adjs) / NUM_SOLUTIONS
+  print(probs)
+
+  return pies, probeslist, probs
 
 
 def bfs(A: _Array, s: int) -> _Out:
