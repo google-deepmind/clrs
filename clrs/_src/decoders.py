@@ -172,6 +172,8 @@ def postprocess(spec: _Spec, preds: Dict[str, _Array],
         data = jax.nn.softmax(data, axis=-1)
     elif t == _Type.POINTER:
       if hard:
+        #TODO: extract actual data values (we think probabilities) from these data.
+        #print('decoders.py, postprocess: ', data)
         data = jnp.argmax(data, -1).astype(float)
       else:
         data = jax.nn.softmax(data, -1)

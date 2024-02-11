@@ -275,7 +275,8 @@ SPECS = types.MappingProxyType({
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
         'A': (Stage.INPUT, Location.EDGE, Type.SCALAR),
         'adj': (Stage.INPUT, Location.EDGE, Type.MASK),
-        'pi': (Stage.OUTPUT, Location.NODE, Type.POINTER),
+        #'pi': (Stage.OUTPUT, Location.NODE, Type.POINTER),
+        'pi': (Stage.OUTPUT, Location.NODE, Type.PERMUTATION_POINTER), # matrix of probabilities
         'pi_h': (Stage.HINT, Location.NODE, Type.POINTER),
         'color': (Stage.HINT, Location.NODE, Type.CATEGORICAL),
         'd': (Stage.HINT, Location.NODE, Type.SCALAR),
