@@ -423,6 +423,9 @@ class BaselineModel(model.Model):
             nb_nodes=nb_nodes,
         )
 
+    # TODO: Remove once validated, as it impacts performance
+    jax.debug.print("[DEBUG] Regularization loss {mse_loss}", mse_loss=mse_loss)
+
     return total_loss
 
   def _update_params(self, params, grads, opt_state, algorithm_index):

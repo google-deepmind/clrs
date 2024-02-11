@@ -530,7 +530,7 @@ class PGN(Processor):
     ## regularized loss.
     ###############
 
-    # Number of messages to sample
+    # Number of messages to sample TODO: Pass through command line
     num_samples_per_node = 2
     # Randomly sample incoming messages for each node. sample_msgs has resulting shape [B, 2, N, H]
     sampled_msgs = sample_msgs(msgs, adj_mat, num_samples_per_node)
@@ -587,7 +587,187 @@ class PGN(Processor):
     ret = compute_node_update(hidden, msgs, z)
 
     return ret, tri_msgs, mse_loss  # pytype: disable=bad-return-type  # numpy-scalars
+  
+class PGN_MaxMax(Processor):
+  """
+  Modified Pointer Graph Networks (Veličković et al., NeurIPS 2020) to
+  enable L2 asynchrony (e.g. asynchrony w.r.t. node update).
+  """
 
+  def __init__(
+      self,
+      out_size: int,
+      mid_size: Optional[int] = None,
+      mid_act: Optional[_Fn] = None,
+      activation: Optional[_Fn] = jax.nn.relu,
+      reduction: _Fn = jnp.max,
+      msgs_mlp_sizes: Optional[List[int]] = None,
+      use_ln: bool = False,
+      use_triplets: bool = False,
+      nb_triplet_fts: int = 8,
+      gated: bool = False,
+      name: str = 'mpnn_aggr',
+  ):
+    super().__init__(name=name)
+    # self.mid_size must be the same as the out_size, so the dimensionality
+    # of the messages matches that of the node hidden state
+    self.mid_size = out_size
+    self.out_size = out_size
+    self.mid_act = mid_act
+    self.activation = activation
+    # Ensure that the reduction used is a maximum
+    self.reduction = jnp.max
+    self._msgs_mlp_sizes = msgs_mlp_sizes
+    self.use_ln = use_ln
+    self.use_triplets = use_triplets
+    self.nb_triplet_fts = nb_triplet_fts
+    # Gating is not required
+    self.gated = False
+
+  def __call__(  # pytype: disable=signature-mismatch  # numpy-scalars
+      self,
+      node_fts: _Array,
+      edge_fts: _Array,
+      graph_fts: _Array,
+      adj_mat: _Array,
+      hidden: _Array,
+      **unused_kwargs,
+  ) -> _Array:
+    """MPNN inference step."""
+
+    # b: batch size, n: number of nodes, h: hidden features
+
+    # node_fts: [B, N, H] 
+    # edge_fts: [B, N, N, H]
+    # graph_fts: [B, H]
+    # adj_mat: [B, N, N]
+    b, n, _ = node_fts.shape
+    assert edge_fts.shape[:-1] == (b, n, n)
+    assert graph_fts.shape[:-1] == (b,)
+    assert adj_mat.shape == (b, n, n)
+
+    # hidden: [B, N, H] (Note that it is possible for this H to be different)
+
+    # Concatenate along last axis
+    # z^{(t)} = x_{i}^{(t)} || h_{i}^{(t-1)}
+    z = jnp.concatenate([node_fts, hidden], axis=-1) # [B, N, 2*H]
+    m_1 = hk.Linear(self.mid_size)
+    m_2 = hk.Linear(self.mid_size)
+    m_e = hk.Linear(self.mid_size)
+    m_g = hk.Linear(self.mid_size)
+
+    msg_1 = m_1(z) # [B, N, self.mid_size]
+    msg_2 = m_2(z) # [B, N, self.mid_size]
+    msg_e = m_e(edge_fts) # [B, N, N, self.mid_size]
+    msg_g = m_g(graph_fts) # [B, self.mid_size]
+
+    tri_msgs = None
+
+    if self.use_triplets:
+      # Triplet messages, as done by Dudzik and Velickovic (2022)
+      triplets = get_triplet_msgs(z, edge_fts, graph_fts, self.nb_triplet_fts)
+
+      o3 = hk.Linear(self.out_size)
+      tri_msgs = o3(jnp.max(triplets, axis=1))  # [B, N, N, H]
+
+      if self.activation is not None:
+        tri_msgs = self.activation(tri_msgs)
+
+    # The partial messages are aggregated by summing them
+    msgs = (
+        jnp.expand_dims(msg_1, axis=1) + # [B, 1, N, self.mid_size]
+        jnp.expand_dims(msg_2, axis=2) + # [B, N, 1, self.mid_size]
+        msg_e + # [B, N, N, self.mid_size]
+        jnp.expand_dims(msg_g, axis=(1, 2))) # [B, 1, 1, self.mid_size]
+
+    if self._msgs_mlp_sizes is not None:
+      # self._msgs_mlp_sizes is a tuple, e.g. [64, 128, 16], with the output dimesions
+      # for a series of Linear layers, followed by their respective activations
+      msgs = hk.nets.MLP(self._msgs_mlp_sizes)(jax.nn.relu(msgs))
+
+    # Additional activation
+    if self.mid_act is not None:
+      msgs = self.mid_act(msgs)
+
+    # Computation of h_{i}^{(t)}=f_{r}(z_{i}^{(t)}, m_{i}^{(t)})
+    def compute_node_update(hidden, msgs):
+      # h_{i}^{(t)} = max(Linear(z_{i}^{(t)}), Linear(m_{i}^{(t)}))
+      # Enables L2 asynchrony
+      ret = jnp.maximum(hidden, msgs)
+      # The activation and the LayerNorm have been removed, I am not sure whethe it is possible
+      # to make some modifications and keep them.
+      return ret
+    
+    # Format compatible with jax.lax.scan. This method is created to prevent
+    # redundant concatenations of the hidden state with the node features,
+    # in comparison with the method compute_node_update which receives z directly
+    def compute_node_update_scan(hidden, msgs):
+      # The hidden state of the node is propagated within the carry. The second
+      # return is None as it is not used, and it is only required by hk.scan
+      return compute_node_update(hidden, msgs), None
+
+    # At this point, messages contains the operation f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)}),
+    # where f_{m} is the message function (MLP with non-linearities)
+      
+    ###############
+    ## The following code includes the operations needed for the computation of the
+    ## regularized loss.
+    ###############
+
+    # Number of messages to sample TODO: Pass through command line
+    num_samples_per_node = 2
+    # Randomly sample incoming messages for each node. sample_msgs has resulting shape [B, 2, N, H]
+    sampled_msgs = sample_msgs(msgs, adj_mat, num_samples_per_node)
+
+    # Computes m_{i}^{(t)} as a reduction over f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)}), 
+    # e.g. m_{i}^{(t)}=max_{1 \leq j \leq n}f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)})
+
+    # sampled_msgs: [B, num_samples_per_node, N, H], sampled_msgs_red: [B, N, H]
+    # Note that there is no need to multiply by the adjacency matrix
+    # as the incoming messages will be sampled from nodes in the 
+    # neighbourhood of each node
+    sampled_msgs_reduced = jnp.max(sampled_msgs, axis=1)
+
+    # Node update for the aggregated sampled messages (first component of the loss)
+    ret_loss_1 = compute_node_update(hidden, sampled_msgs_reduced)
+    # The shape of sample messages is [B, num_samples_per_node, N, H], and the arguments
+    # in jax.lax.scan are passed through the leading dimension
+    sampled_msgs = jnp.transpose(sampled_msgs, (1, 0, 2, 3))
+    # The first update is different to prevent a redundant concatenation of the node
+    # features.
+    next_hidden = compute_node_update(hidden, sampled_msgs[0])
+    # Iterative updates for the sampled messages
+    ret_loss_2, _ = hk.scan(compute_node_update_scan, next_hidden, sampled_msgs[1:], num_samples_per_node-1)
+    # Regularization term penalising the violation of the associativity in the node update
+    mse_loss = jnp.mean((ret_loss_1 - ret_loss_2)**2)
+
+    ###############
+    ## End of code for computing the regularized loss.
+    ###############
+
+    # Computes m_{i}^{(t)} as a reduction over f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)}), 
+    # e.g. m_{i}^{(t)}=max_{1 \leq j \leq n}f_{m}(z_{i}^{(t)}, z_{j}^{(t)}, e_{ij}^{(t)}, g^{(t)})
+    maxarg = jnp.where(jnp.expand_dims(adj_mat, -1),
+                         msgs,
+                         -BIG_NUMBER)
+    msgs = jnp.max(maxarg, axis=1)
+
+    # Computation of h_{i}^{(t)}=f_{r}(z_{i}^{(t)}, m_{i}^{(t)})
+    ret = compute_node_update(hidden, msgs)
+
+    return ret, tri_msgs, mse_loss  # pytype: disable=bad-return-type  # numpy-scalars
+  
+class MPNN_MaxMax(PGN_MaxMax):
+  """
+  Message-Passing Neural Network (Gilmer et al., ICML 2017).
+  Uses the modified PGN_MaxMax to enable L2 asynchrony (e.g. asynchrony w.r.t. node update).
+  """
+
+  def __call__(self, node_fts: _Array, edge_fts: _Array, graph_fts: _Array,
+               adj_mat: _Array, hidden: _Array, **unused_kwargs) -> _Array:
+    # The adjacency matrix has all its entries set to 1: the graph is fully-connected
+    adj_mat = jnp.ones_like(adj_mat)
+    return super().__call__(node_fts, edge_fts, graph_fts, adj_mat, hidden)
 
 class DeepSets(PGN):
   """Deep Sets (Zaheer et al., NeurIPS 2017)."""
@@ -975,6 +1155,15 @@ def get_processor_factory(kind: str,
       )
     elif kind == 'triplet_gmpnn':
       processor = MPNN(
+          out_size=out_size,
+          msgs_mlp_sizes=[out_size, out_size],
+          use_ln=use_ln,
+          use_triplets=True,
+          nb_triplet_fts=nb_triplet_fts,
+          gated=True,
+      )
+    elif kind == 'triplet_gmpnn_max_max':
+      processor = MPNN_MaxMax(
           out_size=out_size,
           msgs_mlp_sizes=[out_size, out_size],
           use_ln=use_ln,

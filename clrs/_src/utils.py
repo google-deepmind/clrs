@@ -33,7 +33,7 @@ def sample_msgs(msgs, adj_mat, num_samples_per_node, seed=0):
 
     key = random.PRNGKey(seed)  # PRNG key for reproducibility
     key, subkey = random.split(key)
-
+    # TODO: Ensure that the messages come from nodes in the neighbourhood
     # hk.next_rng_key() - use this key instead
 
     # Generate random indices
