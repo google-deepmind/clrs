@@ -155,6 +155,7 @@ class BaselineModel(model.Model):
       hint_repred_mode: str = 'soft',
       name: str = 'base_model',
       nb_msg_passing_steps: int = 1,
+      regularisation_weight: float = 0.0,
   ):
     """Constructor for BaselineModel.
 
@@ -223,6 +224,7 @@ class BaselineModel(model.Model):
       self.opt = optax.adam(learning_rate)
 
     self.nb_msg_passing_steps = nb_msg_passing_steps
+    self.regularisation_weight = regularisation_weight
 
     self.nb_dims = []
     if isinstance(dummy_trajectory, _Feedback):
@@ -424,9 +426,10 @@ class BaselineModel(model.Model):
         )
 
     # TODO: Remove once validated, as it impacts performance
-    jax.debug.print("[DEBUG] Regularization loss {mse_loss}", mse_loss=mse_loss)
+    regularisation_loss = self.regularisation_weight * mse_loss
+    jax.debug.print("[DEBUG] Regularised loss {reg_loss}, Regularisation weight {reg_weight}, MSE loss {mse_loss}", reg_loss=regularisation_loss, reg_weight=self.regularisation_weight, mse_loss=mse_loss)
 
-    return total_loss
+    return total_loss + regularisation_loss
 
   def _update_params(self, params, grads, opt_state, algorithm_index):
     updates, opt_state = filter_null_grads(

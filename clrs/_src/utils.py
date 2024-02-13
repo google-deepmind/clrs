@@ -13,11 +13,11 @@
 # limitations under the License.
 # ==============================================================================
 
-import jax
+import haiku as hk
 import jax.numpy as jnp
 from jax import random
 
-def sample_msgs(msgs, adj_mat, num_samples_per_node, seed=0):
+def sample_msgs(msgs, adj_mat, num_samples_per_node, seed=None):
     """Processor inference step.
 
     Args:
@@ -31,10 +31,12 @@ def sample_msgs(msgs, adj_mat, num_samples_per_node, seed=0):
 
     b, n, _, h = msgs.shape
 
-    key = random.PRNGKey(seed)  # PRNG key for reproducibility
-    key, subkey = random.split(key)
+    if seed is not None:
+      key = random.PRNGKey(seed)  # PRNG key for reproducibility
+      key, subkey = random.split(key)
+    else:
+       subkey = hk.next_rng_key()
     # TODO: Ensure that the messages come from nodes in the neighbourhood
-    # hk.next_rng_key() - use this key instead
 
     # Generate random indices
     # random_indices shape will be [B, N, 2], with values in range [0, N)
