@@ -42,6 +42,7 @@ import chex
 from clrs._src import probing
 from clrs._src import specs
 import numpy as np
+import scipy as sp
 
 
 _Array = np.ndarray
@@ -81,7 +82,6 @@ def dfs(A: _Array) -> _Out:
       time = 0
       shuffled = np.arange(A.shape[0])
       np.random.shuffle(shuffled)
-      print("You are running a modified CLRS version!")
       for s in range(A.shape[0]):
         if color[s] == 0:
           s_last = s
@@ -182,7 +182,7 @@ def dfs(A: _Array) -> _Out:
       probing.finalize(probes)
 
       pies.append(pi)
-      probeslist.append(probes)
+      #probeslist.append(probes)
 
   adjs = []
   for i in range(NUM_SOLUTIONS):
@@ -190,10 +190,10 @@ def dfs(A: _Array) -> _Out:
     for j in range(len(pies[0])):
         adj[j, pies[i][j]] = 1
     adjs.append(adj)
-  probs = sum(adjs) / NUM_SOLUTIONS
-  print(probs)
-
-  return pies, probeslist, probs
+  parent_dist = sum(adjs) / NUM_SOLUTIONS
+  parent_dist = sp.special.logit(parent_dist)
+  #print(probes)
+  return pi, probes
 
 
 def bfs(A: _Array, s: int) -> _Out:
