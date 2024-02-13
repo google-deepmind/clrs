@@ -17,3 +17,9 @@ venv/
 # Editors
 .idea
 .vscode
+
+# SLURM jobs files
+clrs_slurm
+logs/
+slurm-*
+machine.file.
