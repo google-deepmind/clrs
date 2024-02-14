@@ -1,0 +1,6 @@
+{
+    "0": {
+        "processor_type": "triplet_gmpnn",
+        "regularisation_weight": 0.0
+    }
+}
