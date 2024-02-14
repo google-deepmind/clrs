@@ -74,6 +74,12 @@ def output_loss_chunked(truth: _DataPoint, pred: _Array,
     # Compute the cross entropy between doubly stochastic pred and truth_data
     loss = -jnp.sum(truth.data * pred, axis=-1)
 
+  elif truth.type_ == _Type.DOBRIK_AND_DANILO:
+    #TODO test!
+    # Predictions are NxN probabilities.
+    # Compute the KL divergence between predictions and 'true' distribution
+    loss = -jnp.sum(truth.data * jnp.log(pred/truth.data), axis=-1)
+
   if mask is not None:
     mask = mask * _expand_and_broadcast_to(is_last, loss)
   else:
@@ -111,6 +117,12 @@ def output_loss(truth: _DataPoint, pred: _Array, nb_nodes: int) -> float:
     # Predictions are NxN logits aiming to represent a doubly stochastic matrix.
     # Compute the cross entropy between doubly stochastic pred and truth_data
     total_loss = jnp.mean(-jnp.sum(truth.data * pred, axis=-1))
+
+  elif truth.type_ == _Type.DOBRIK_AND_DANILO:
+    #TODO test!
+    # Predictions are NxN probabilities.
+    # Compute the KL divergence between predictions and 'true' distribution
+    total_loss = -jnp.sum(truth.data * jnp.log(pred/truth.data), axis=-1)[0]
 
   return total_loss  # pytype: disable=bad-return-type  # jnp-type
 
@@ -196,6 +208,12 @@ def _hint_loss(
     # Predictions are NxN logits aiming to represent a doubly stochastic matrix.
     # Compute the cross entropy between doubly stochastic pred and truth_data
     loss = -jnp.sum(truth_data * pred, axis=-1)
+
+  elif truth.type_ == _Type.DOBRIK_AND_DANILO:
+    #TODO test!
+    # Predictions are NxN probabilities.
+    # Compute the KL divergence between predictions and 'true' distribution
+    loss = -jnp.sum(truth.data * jnp.log(pred/truth.data), axis=-1)
 
   if mask is None:
     mask = jnp.ones_like(loss)

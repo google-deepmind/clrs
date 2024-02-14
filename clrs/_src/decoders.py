@@ -70,7 +70,7 @@ def construct_decoders(loc: str, t: str, hidden_dim: int, nb_dims: int,
   linear = functools.partial(hk.Linear, name=f"{name}_dec_linear")
   if loc == _Location.NODE:
     # Node decoders.
-    if t in [_Type.SCALAR, _Type.MASK, _Type.MASK_ONE]:
+    if t in [_Type.SCALAR, _Type.MASK, _Type.MASK_ONE, _Type.DOBRIK_AND_DANILO]:
       decoders = (linear(1),)
     elif t == _Type.CATEGORICAL:
       decoders = (linear(nb_dims),)
@@ -189,6 +189,8 @@ def postprocess(spec: _Spec, preds: Dict[str, _Array],
       data = jnp.exp(data)
       if hard:
         data = jax.nn.one_hot(jnp.argmax(data, axis=-1), data.shape[-1])
+    elif t == _Type.DOBRIK_AND_DANILO:
+      pass # DO WE DO ANYTHING HERE?
     else:
       raise ValueError("Invalid type")
     result[name] = probing.DataPoint(
@@ -241,7 +243,7 @@ def _decode_node_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
                      adj_mat: _Array, inf_bias: bool, repred: bool) -> _Array:
   """Decodes node features."""
 
-  if t in [_Type.SCALAR, _Type.MASK, _Type.MASK_ONE]:
+  if t in [_Type.SCALAR, _Type.MASK, _Type.MASK_ONE, _Type.DOBRIK_AND_DANILO]:
     preds = jnp.squeeze(decoders[0](h_t), -1)
   elif t == _Type.CATEGORICAL:
     preds = decoders[0](h_t)

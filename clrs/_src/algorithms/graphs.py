@@ -191,9 +191,11 @@ def dfs(A: _Array) -> _Out:
         adj[j, pies[i][j]] = 1
     adjs.append(adj)
   parent_dist = sum(adjs) / NUM_SOLUTIONS
-  parent_dist = sp.special.logit(parent_dist)
+  #parent_dist = sp.special.logit(parent_dist)
   #print(probes)
-  return pi, probes
+  #print(parent_dist)
+  return parent_dist, probes
+  #return pi, probes
 
 
 def bfs(A: _Array, s: int) -> _Out:

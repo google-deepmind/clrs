@@ -64,6 +64,9 @@ def _reduce_permutations_tuple(
   i = 0
   while i < len(targets):
     truth = targets[i]
+    #hi
+    print('in evalutation, truth=', truth)
+    print(truth.data)
     if truth.type_ != specs.Type.PERMUTATION_POINTER:
       out_targets.append(truth)
       i += 1
@@ -128,7 +131,10 @@ def evaluate(
 ) -> Dict[str, float]:
   """Evaluate output predictions."""
   evals = {}
+  print('in evaluate method, outputs=', outputs)
   outputs = _reduce_permutations_tuple(outputs)
+  #print('in evaluate method, predictions=', predictions)
+  #print(predictions[0].data)
   predictions = _reduce_permutations_dict(predictions)
   for truth in outputs:
     assert truth.name in predictions
@@ -199,4 +205,6 @@ _EVAL_FN = {
         _eval_one,
     specs.Type.POINTER:
         lambda pred, truth: np.mean((pred == truth) * 1.0),
+    specs.Type.DOBRIK_AND_DANILO:
+        lambda pred, truth: np.mean((pred == truth) * 1.0), #_eval_one
 }
