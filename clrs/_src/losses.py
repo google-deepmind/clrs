@@ -122,7 +122,10 @@ def output_loss(truth: _DataPoint, pred: _Array, nb_nodes: int) -> float:
     #TODO test!
     # Predictions are NxN probabilities.
     # Compute the KL divergence between predictions and 'true' distribution
+    print('loss begin')
     total_loss = -jnp.sum(truth.data * jnp.log(pred/truth.data), axis=-1)[0]
+    print('loss end')
+    print(total_loss)
 
   return total_loss  # pytype: disable=bad-return-type  # jnp-type
 

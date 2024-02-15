@@ -70,13 +70,14 @@ def construct_decoders(loc: str, t: str, hidden_dim: int, nb_dims: int,
   linear = functools.partial(hk.Linear, name=f"{name}_dec_linear")
   if loc == _Location.NODE:
     # Node decoders.
-    if t in [_Type.SCALAR, _Type.MASK, _Type.MASK_ONE, _Type.DOBRIK_AND_DANILO]:
+    if t in [_Type.SCALAR, _Type.MASK, _Type.MASK_ONE]:
       decoders = (linear(1),)
     elif t == _Type.CATEGORICAL:
       decoders = (linear(nb_dims),)
-    elif t in [_Type.POINTER, _Type.PERMUTATION_POINTER]:
+    elif t in [_Type.POINTER, _Type.PERMUTATION_POINTER, _Type.DOBRIK_AND_DANILO]:
       decoders = (linear(hidden_dim), linear(hidden_dim), linear(hidden_dim),
                   linear(1))
+    # if doesn't work, try 4 linear of hidden_dimension, use instead of maximum
     else:
       raise ValueError(f"Invalid Type {t}")
 
@@ -243,20 +244,27 @@ def _decode_node_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
                      adj_mat: _Array, inf_bias: bool, repred: bool) -> _Array:
   """Decodes node features."""
 
-  if t in [_Type.SCALAR, _Type.MASK, _Type.MASK_ONE, _Type.DOBRIK_AND_DANILO]:
+  if t in [_Type.SCALAR, _Type.MASK, _Type.MASK_ONE]:
     preds = jnp.squeeze(decoders[0](h_t), -1)
   elif t == _Type.CATEGORICAL:
     preds = decoders[0](h_t)
-  elif t in [_Type.POINTER, _Type.PERMUTATION_POINTER]:
-    p_1 = decoders[0](h_t)
-    p_2 = decoders[1](h_t)
-    p_3 = decoders[2](edge_fts)
+  elif t in [_Type.POINTER, _Type.PERMUTATION_POINTER, _Type.DOBRIK_AND_DANILO]:
+    p_1 = decoders[0](h_t) # from vector
+    p_2 = decoders[1](h_t) # to vector  shape [batch,nodes,hidden]
+    p_3 = decoders[2](edge_fts) # edge features [batch,nodes,nodes,hidden]
 
-    p_e = jnp.expand_dims(p_2, -2) + p_3
-    p_m = jnp.maximum(jnp.expand_dims(p_1, -2),
-                      jnp.transpose(p_e, (0, 2, 1, 3)))
+    p_e = jnp.expand_dims(p_2, -2) + p_3 # [batch,nodes,1,hidden] summed with [batch,nodes,nodes,hidden]
+    # to_i  + edge_ij: [batch,nodes_i,nodes_j,hidden]
+    p_m = jnp.maximum(jnp.expand_dims(p_1, -2), # [batch,nodes_i,1,hidden] -> [batch,nodes_i,nodes_i,hidden]
+                      jnp.transpose(p_e, (0, 2, 1, 3))) # [batch, nodes_j, nodes_i, hidden]
+    #p_m shape [batch, nodes_j, nodes_i, hidden]
+    # computed elementwise max of (to_i + edge_ij, from_i)
 
-    preds = jnp.squeeze(decoders[3](p_m), -1)
+    preds = jnp.squeeze(decoders[3](p_m), -1) # cut out hidden dimension
+    #to = to.max(from+edge)
+
+    ## TODO if cse if this doesn't work. instead of jnp.maximum, another decoder.
+    #decoders.for
 
     if inf_bias:
       per_batch_min = jnp.min(preds, axis=range(1, preds.ndim), keepdims=True)

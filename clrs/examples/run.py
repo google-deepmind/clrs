@@ -434,6 +434,8 @@ def main(unused_argv):
 
   while step < FLAGS.train_steps:
     feedback_list = [next(t) for t in train_samplers]
+    # check after feedback list what we get is ground-truth probabilities
+    print(feedback_list)
 
     # Initialize model.
     if step == 0:
