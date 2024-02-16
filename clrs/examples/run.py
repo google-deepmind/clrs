@@ -379,11 +379,13 @@ def main(unused_argv):
   rng = np.random.RandomState(FLAGS.seed)
   rng_key = jax.random.PRNGKey(rng.randint(2**32))
 
+  print('calling create samplers')
   # Create samplers
   (train_samplers,
    val_samplers, val_sample_counts,
    test_samplers, test_sample_counts,
    spec_list) = create_samplers(rng, train_lengths)
+  print('run.py made samplers')
 
   processor_factory = clrs.get_processor_factory(
       FLAGS.processor_type,
@@ -422,6 +424,10 @@ def main(unused_argv):
   else:
     train_model = eval_model
 
+  #exit(0)
+
+  print('run.py starting training')
+
   # Training loop.
   best_score = -1.0
   current_train_items = [0] * len(FLAGS.algorithms)
@@ -435,7 +441,8 @@ def main(unused_argv):
   while step < FLAGS.train_steps:
     feedback_list = [next(t) for t in train_samplers]
     # check after feedback list what we get is ground-truth probabilities
-    print(feedback_list)
+    print('run.py, feedback_list[0]', feedback_list[0])
+    breakpoint()
 
     # Initialize model.
     if step == 0:
@@ -451,6 +458,7 @@ def main(unused_argv):
       else:
         train_model.init(all_features, FLAGS.seed + 1)
 
+    print('run.py model initialized')
     # Training step.
     for algo_idx in range(len(train_samplers)):
       feedback = feedback_list[algo_idx]
@@ -518,6 +526,7 @@ def main(unused_argv):
   logging.info('Restoring best model from checkpoint...')
   eval_model.restore_model('best.pkl', only_load_processor=False)
 
+  print('run.py doing logging?')
   for algo_idx in range(len(train_samplers)):
     common_extras = {'examples_seen': current_train_items[algo_idx],
                      'step': step,

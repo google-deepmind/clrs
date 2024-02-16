@@ -262,6 +262,7 @@ def _decode_node_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
 
     preds = jnp.squeeze(decoders[3](p_m), -1) # cut out hidden dimension
     #to = to.max(from+edge)
+    breakpoint()
 
     ## TODO if cse if this doesn't work. instead of jnp.maximum, another decoder.
     #decoders.for

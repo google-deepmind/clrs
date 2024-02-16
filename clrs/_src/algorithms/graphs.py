@@ -182,7 +182,11 @@ def dfs(A: _Array) -> _Out:
       probing.finalize(probes)
 
       pies.append(pi)
-      #probeslist.append(probes)
+      probeslist.append(probes)
+      # only take the time hint, to figure out trajectory length
+      # run code in no-hint mode
+      # for every probing.push, +1 iteration of the GNN
+
 
   adjs = []
   for i in range(NUM_SOLUTIONS):
@@ -194,8 +198,14 @@ def dfs(A: _Array) -> _Out:
   #parent_dist = sp.special.logit(parent_dist)
   #print(probes)
   #print(parent_dist)
-  return parent_dist, probes
+  probeslist[0]['output']['node']['pi']['data'] = parent_dist
+  #breakpoint()
+  return parent_dist,
+
+
   #return pi, probes
+
+  #first arg gets thrown out. probes kept.
 
 
 def bfs(A: _Array, s: int) -> _Out:

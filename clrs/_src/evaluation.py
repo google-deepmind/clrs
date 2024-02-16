@@ -160,6 +160,8 @@ def _evaluate(truth, pred, idx=None, lengths=None):
       return 0.
     truth_data = truth_data[idx][idx < lengths]
     pred_data = pred_data[idx < lengths]
+  print('getting here?')
+  breakpoint()
   return _EVAL_FN[truth.type_](pred_data, truth_data)
 
 
