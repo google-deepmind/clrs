@@ -200,7 +200,7 @@ def dfs(A: _Array) -> _Out:
   #print(parent_dist)
   probeslist[0]['output']['node']['pi']['data'] = parent_dist
   #breakpoint()
-  return parent_dist,
+  return parent_dist, probeslist[0]
 
 
   #return pi, probes
