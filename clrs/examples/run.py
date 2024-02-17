@@ -491,6 +491,8 @@ def main(unused_argv):
                          'step': step,
                          'algorithm': FLAGS.algorithms[algo_idx]}
         breakpoint()
+        #TODO ground truth here becomes pointers instead of probabilities :(
+
         # Validation info.
         new_rng_key, rng_key = jax.random.split(rng_key)
         val_stats = collect_and_eval(
