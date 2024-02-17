@@ -490,7 +490,7 @@ def main(unused_argv):
         common_extras = {'examples_seen': current_train_items[algo_idx],
                          'step': step,
                          'algorithm': FLAGS.algorithms[algo_idx]}
-
+        breakpoint()
         # Validation info.
         new_rng_key, rng_key = jax.random.split(rng_key)
         val_stats = collect_and_eval(
@@ -533,6 +533,7 @@ def main(unused_argv):
                      'algorithm': FLAGS.algorithms[algo_idx]}
 
     new_rng_key, rng_key = jax.random.split(rng_key)
+    breakpoint()
     test_stats = collect_and_eval(
         test_samplers[algo_idx],
         functools.partial(eval_model.predict, algorithm_index=algo_idx),

@@ -123,8 +123,12 @@ def output_loss(truth: _DataPoint, pred: _Array, nb_nodes: int) -> float:
     # Predictions are NxN probabilities.
     # Compute the KL divergence between predictions and 'true' distribution
     print('loss begin')
+    # TODO filter predictions >1 to 1, <0 to 0
+    pred = jnp.minimum(pred, 1)
+    pred = jnp.maximum(pred, 0)
     jax.debug.print('losses.py, truth.data: {}', truth.data)
-    total_loss = -jnp.sum(jnp.sum(truth.data * jnp.log(pred/truth.data), axis=-1))
+    total_loss = -jnp.sum(jnp.sum(truth.data * jnp.log(pred, axis=-1))
+    jax.debug.print('losses.py, total_loss: {}', total_loss)
     print('loss end')
 
   return total_loss  # pytype: disable=bad-return-type  # jnp-type
