@@ -74,9 +74,13 @@ def construct_decoders(loc: str, t: str, hidden_dim: int, nb_dims: int,
       decoders = (linear(1),)
     elif t == _Type.CATEGORICAL:
       decoders = (linear(nb_dims),)
-    elif t in [_Type.POINTER, _Type.PERMUTATION_POINTER, _Type.DOBRIK_AND_DANILO]:
+    elif t in [_Type.POINTER, _Type.PERMUTATION_POINTER]:
       decoders = (linear(hidden_dim), linear(hidden_dim), linear(hidden_dim),
                   linear(1))
+    elif t == _Type.DOBRIK_AND_DANILO:
+      decoders = (linear(hidden_dim), linear(hidden_dim), linear(hidden_dim),
+                  jax.nn.softmax) #FIXME
+    # TODO make sure no negative preds!
     # if doesn't work, try 4 linear of hidden_dimension, use instead of maximum
     else:
       raise ValueError(f"Invalid Type {t}")
@@ -191,7 +195,8 @@ def postprocess(spec: _Spec, preds: Dict[str, _Array],
       if hard:
         data = jax.nn.one_hot(jnp.argmax(data, axis=-1), data.shape[-1])
     elif t == _Type.DOBRIK_AND_DANILO:
-      pass # DO WE DO ANYTHING HERE?
+      data = jax.nn.softmax(data)
+      #pass # DO WE DO ANYTHING HERE?
     else:
       raise ValueError("Invalid type")
     result[name] = probing.DataPoint(
@@ -255,7 +260,7 @@ def _decode_node_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
 
     p_e = jnp.expand_dims(p_2, -2) + p_3 # [batch,nodes,1,hidden] summed with [batch,nodes,nodes,hidden]
     # to_i  + edge_ij: [batch,nodes_i,nodes_j,hidden]
-    jax.debug.print("preds before max: {}", jnp.exp(p_e))
+    jax.debug.print("preds before max: {}", p_e)
     p_m = jnp.maximum(jnp.expand_dims(p_1, -2), # [batch,nodes_i,1,hidden] -> [batch,nodes_i,nodes_i,hidden]
                       jnp.transpose(p_e, (0, 2, 1, 3))) # [batch, nodes_j, nodes_i, hidden]
     #p_m shape [batch, nodes_j, nodes_i, hidden]
@@ -263,8 +268,8 @@ def _decode_node_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
 
     preds = jnp.squeeze(decoders[3](p_m), -1) # cut out hidden dimension
     #to = to.max(from+edge)
-    jax.debug.print("preds post-max: {}", jnp.exp(preds))
-    breakpoint()
+    jax.debug.print("preds post-max: {}", preds)
+    #breakpoint()
 
     ## TODO if cse if this doesn't work. instead of jnp.maximum, another decoder.
     #decoders.for

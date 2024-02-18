@@ -55,7 +55,7 @@ flags.DEFINE_boolean('chunked_training', False,
 flags.DEFINE_integer('chunk_length', 16,
                      'Time chunk length used for training (if '
                      '`chunked_training` is True.')
-flags.DEFINE_integer('train_steps', 1, 'Number of training iterations.')
+flags.DEFINE_integer('train_steps', 100, 'Number of training iterations.')
 flags.DEFINE_integer('eval_every', 50, 'Evaluation frequency (in steps).')
 flags.DEFINE_integer('test_every', 500, 'Evaluation frequency (in steps).')
 
@@ -203,6 +203,7 @@ def make_sampler(length: int,
     if infinite samples), and the spec.
   """
   if length < 0:  # load from file
+    print('run.py loading from dataset')
     dataset_folder = _maybe_download_dataset(FLAGS.dataset_path)
     sampler, num_samples, spec = clrs.create_dataset(folder=dataset_folder,
                                                      algorithm=algorithm,
@@ -266,6 +267,7 @@ def collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
   outputs = _concat(outputs, axis=0)
   preds = _concat(preds, axis=0)
   out = clrs.evaluate(outputs, preds)
+  #breakpoint()
   if extras:
     out.update(extras)
   return {k: unpack(v) for k, v in out.items()}
@@ -338,7 +340,7 @@ def create_samplers(rng, train_lengths: List[int]):
                       **common_sampler_args)
       val_sampler, val_samples, spec = make_multi_sampler(**val_args)
 
-      test_args = dict(sizes=[-1],
+      test_args = dict(sizes=[5], #TODO vary, old code: sizes=[-1],
                        split='test',
                        batch_size=32,
                        multiplier=2 * mult,
@@ -442,7 +444,7 @@ def main(unused_argv):
     feedback_list = [next(t) for t in train_samplers]
     # check after feedback list what we get is ground-truth probabilities
     print('run.py, feedback_list[0]', feedback_list[0])
-    breakpoint()
+    #breakpoint()
 
     # Initialize model.
     if step == 0:
@@ -490,8 +492,8 @@ def main(unused_argv):
         common_extras = {'examples_seen': current_train_items[algo_idx],
                          'step': step,
                          'algorithm': FLAGS.algorithms[algo_idx]}
-        breakpoint()
-        #TODO ground truth here becomes pointers instead of probabilities :(
+        #breakpoint()
+
 
         # Validation info.
         new_rng_key, rng_key = jax.random.split(rng_key)
@@ -535,7 +537,7 @@ def main(unused_argv):
                      'algorithm': FLAGS.algorithms[algo_idx]}
 
     new_rng_key, rng_key = jax.random.split(rng_key)
-    breakpoint()
+    #breakpoint()
     test_stats = collect_and_eval(
         test_samplers[algo_idx],
         functools.partial(eval_model.predict, algorithm_index=algo_idx),

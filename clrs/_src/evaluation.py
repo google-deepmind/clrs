@@ -159,9 +159,10 @@ def _evaluate(truth, pred, idx=None, lengths=None):
     if np.all(idx >= lengths):
       return 0.
     truth_data = truth_data[idx][idx < lengths]
+    #print('truth_data: {}', truth_data)
     pred_data = pred_data[idx < lengths]
   print('getting here?')
-  breakpoint()
+  #breakpoint()
   return _EVAL_FN[truth.type_](pred_data, truth_data)
 
 
@@ -208,5 +209,5 @@ _EVAL_FN = {
     specs.Type.POINTER:
         lambda pred, truth: np.mean((pred == truth) * 1.0),
     specs.Type.DOBRIK_AND_DANILO:
-        lambda pred, truth: np.mean((pred == truth) * 1.0), #_eval_one
+        lambda pred, truth: np.mean(np.abs(pred - truth) * 1.0), #_eval_one
 }

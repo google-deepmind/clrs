@@ -127,11 +127,12 @@ def output_loss(truth: _DataPoint, pred: _Array, nb_nodes: int) -> float:
     #pred = jnp.minimum(pred, 1)
     # filter predictions <0 to 0
     #pred = jnp.maximum(pred, 0)
-    pred = jax.nn.softmax(pred)
+    #pred = jax.nn.softmax(pred)
     epsilon = 1e-8 # Add a small epsilon to avoid taking the logarithm of zero
     jax.debug.print('losses.py, truth.data: {}', truth.data)
     total_loss = -jnp.sum(jnp.sum(truth.data * jnp.log((pred+epsilon)/(truth.data+epsilon)), axis=-1))
     jax.debug.print('losses.py, total_loss: {}', total_loss)
+    breakpoint()
     print('loss end')
 
   return total_loss  # pytype: disable=bad-return-type  # jnp-type
