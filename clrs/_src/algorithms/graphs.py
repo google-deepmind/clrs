@@ -1201,6 +1201,14 @@ def bellman_ford(A: _Array, s: int) -> _Out:
   msk = np.zeros(A.shape[0])
   d[s] = 0
   msk[s] = 1
+
+  shuffled1 = np.arange(1, A.shape[0])
+  np.random.shuffle(shuffled1)
+  shuffled1 = np.concatenate(([0],shuffled1))
+
+  # shuffled for inner loop
+  shuffled2 = np.arange(A.shape[0])
+  np.random.shuffle(shuffled2)
   while True:
     prev_d = np.copy(d)
     prev_msk = np.copy(msk)
@@ -1212,8 +1220,8 @@ def bellman_ford(A: _Array, s: int) -> _Out:
             'd': np.copy(prev_d),
             'msk': np.copy(prev_msk)
         })
-    for u in range(A.shape[0]):
-      for v in range(A.shape[0]):
+    for u in shuffled1:
+      for v in shuffled2:
         if prev_msk[u] == 1 and A[u, v] != 0:
           if msk[v] == 0 or prev_d[u] + A[u, v] < d[v]:
             d[v] = prev_d[u] + A[u, v]
@@ -1226,7 +1234,6 @@ def bellman_ford(A: _Array, s: int) -> _Out:
   probing.finalize(probes)
 
   return pi, probes
-
 
 def dijkstra(A: _Array, s: int) -> _Out:
   """Dijkstra's single-source shortest path (Dijkstra, 1959)."""
