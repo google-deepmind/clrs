@@ -29,6 +29,7 @@ import numpy as np
 import requests
 import tensorflow as tf
 
+# EDITED TO REDUCE NUMBER OF TRAINING STEPS, 10000->10
 
 flags.DEFINE_list('algorithms', ['dfs'], 'Which algorithms to run.')
 flags.DEFINE_list('train_lengths', ['4', '7', '11', '13', '16'],
@@ -49,13 +50,13 @@ flags.DEFINE_boolean('enforce_permutations', True,
                      'Whether to enforce permutation-type node pointers.')
 flags.DEFINE_boolean('enforce_pred_as_input', True,
                      'Whether to change pred_h hints into pred inputs.')
-flags.DEFINE_integer('batch_size', 1, 'Batch size used for training.')
+flags.DEFINE_integer('batch_size', 32, 'Batch size used for training.')
 flags.DEFINE_boolean('chunked_training', False,
                      'Whether to use chunking for training.')
 flags.DEFINE_integer('chunk_length', 16,
                      'Time chunk length used for training (if '
                      '`chunked_training` is True.')
-flags.DEFINE_integer('train_steps', 100, 'Number of training iterations.')
+flags.DEFINE_integer('train_steps', 10, 'Number of training iterations.')
 flags.DEFINE_integer('eval_every', 50, 'Evaluation frequency (in steps).')
 flags.DEFINE_integer('test_every', 500, 'Evaluation frequency (in steps).')
 
@@ -203,7 +204,6 @@ def make_sampler(length: int,
     if infinite samples), and the spec.
   """
   if length < 0:  # load from file
-    print('run.py loading from dataset')
     dataset_folder = _maybe_download_dataset(FLAGS.dataset_path)
     sampler, num_samples, spec = clrs.create_dataset(folder=dataset_folder,
                                                      algorithm=algorithm,
@@ -260,14 +260,15 @@ def collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
     feedback = next(sampler)
     batch_size = feedback.outputs[0].data.shape[0]
     outputs.append(feedback.outputs)
+    print('mod-run.py, feedback.outputs: ', feedback.outputs)
     new_rng_key, rng_key = jax.random.split(rng_key)
     cur_preds, _ = predict_fn(new_rng_key, feedback.features)
+    print('mod-run.py, cur_preds: ', cur_preds["pi"].data)
     preds.append(cur_preds)
     processed_samples += batch_size
   outputs = _concat(outputs, axis=0)
   preds = _concat(preds, axis=0)
   out = clrs.evaluate(outputs, preds)
-  #breakpoint()
   if extras:
     out.update(extras)
   return {k: unpack(v) for k, v in out.items()}
@@ -340,7 +341,7 @@ def create_samplers(rng, train_lengths: List[int]):
                       **common_sampler_args)
       val_sampler, val_samples, spec = make_multi_sampler(**val_args)
 
-      test_args = dict(sizes=[5], #TODO vary, old code: sizes=[-1],
+      test_args = dict(sizes=[-1],
                        split='test',
                        batch_size=32,
                        multiplier=2 * mult,
@@ -381,13 +382,11 @@ def main(unused_argv):
   rng = np.random.RandomState(FLAGS.seed)
   rng_key = jax.random.PRNGKey(rng.randint(2**32))
 
-  print('calling create samplers')
   # Create samplers
   (train_samplers,
    val_samplers, val_sample_counts,
    test_samplers, test_sample_counts,
    spec_list) = create_samplers(rng, train_lengths)
-  print('run.py made samplers')
 
   processor_factory = clrs.get_processor_factory(
       FLAGS.processor_type,
@@ -426,10 +425,6 @@ def main(unused_argv):
   else:
     train_model = eval_model
 
-  #exit(0)
-
-  print('run.py starting training')
-
   # Training loop.
   best_score = -1.0
   current_train_items = [0] * len(FLAGS.algorithms)
@@ -442,9 +437,6 @@ def main(unused_argv):
 
   while step < FLAGS.train_steps:
     feedback_list = [next(t) for t in train_samplers]
-    # check after feedback list what we get is ground-truth probabilities
-    print('run.py, feedback_list[0]', feedback_list[0])
-    #breakpoint()
 
     # Initialize model.
     if step == 0:
@@ -460,7 +452,6 @@ def main(unused_argv):
       else:
         train_model.init(all_features, FLAGS.seed + 1)
 
-    print('run.py model initialized')
     # Training step.
     for algo_idx in range(len(train_samplers)):
       feedback = feedback_list[algo_idx]
@@ -492,9 +483,9 @@ def main(unused_argv):
         common_extras = {'examples_seen': current_train_items[algo_idx],
                          'step': step,
                          'algorithm': FLAGS.algorithms[algo_idx]}
-        #breakpoint()
 
-
+        #EDITED
+        #print(eval_model.predict(, algorithm_index=algo_idx))
         # Validation info.
         new_rng_key, rng_key = jax.random.split(rng_key)
         val_stats = collect_and_eval(
@@ -530,14 +521,12 @@ def main(unused_argv):
   logging.info('Restoring best model from checkpoint...')
   eval_model.restore_model('best.pkl', only_load_processor=False)
 
-  print('run.py doing logging?')
   for algo_idx in range(len(train_samplers)):
     common_extras = {'examples_seen': current_train_items[algo_idx],
                      'step': step,
                      'algorithm': FLAGS.algorithms[algo_idx]}
 
     new_rng_key, rng_key = jax.random.split(rng_key)
-    #breakpoint()
     test_stats = collect_and_eval(
         test_samplers[algo_idx],
         functools.partial(eval_model.predict, algorithm_index=algo_idx),
