@@ -79,7 +79,7 @@ def construct_decoders(loc: str, t: str, hidden_dim: int, nb_dims: int,
                   linear(1))
     elif t == _Type.DOBRIK_AND_DANILO:
       decoders = (linear(hidden_dim), linear(hidden_dim), linear(hidden_dim),
-                  jax.nn.softmax) #FIXME
+                  linear(1)) #FIXME
     # TODO make sure no negative preds!
     # if doesn't work, try 4 linear of hidden_dimension, use instead of maximum
     else:
@@ -253,7 +253,44 @@ def _decode_node_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
     preds = jnp.squeeze(decoders[0](h_t), -1)
   elif t == _Type.CATEGORICAL:
     preds = decoders[0](h_t)
-  elif t in [_Type.POINTER, _Type.PERMUTATION_POINTER, _Type.DOBRIK_AND_DANILO]:
+  elif t == _Type.DOBRIK_AND_DANILO:
+    p_1 = decoders[0](h_t) # from vector
+    p_2 = decoders[1](h_t) # to vector  shape [batch,nodes,hidden]
+    p_3 = decoders[2](edge_fts) # edge features [batch,nodes,nodes,hidden]
+
+    p_e = jnp.expand_dims(p_2, -2) + p_3 # [batch,nodes,1,hidden] summed with [batch,nodes,nodes,hidden]
+    # to_i  + edge_ij: [batch,nodes_i,nodes_j,hidden]
+    #jax.debug.print("preds before max: {}", p_e)
+    p_m = jnp.maximum(jnp.expand_dims(p_1, -2), # [batch,nodes_i,1,hidden] -> [batch,nodes_i,nodes_i,hidden]
+                      jnp.transpose(p_e, (0, 2, 1, 3))) # [batch, nodes_j, nodes_i, hidden]
+    #p_m shape [batch, nodes_j, nodes_i, hidden]
+    # computed elementwise max of (to_i + edge_ij, from_i)
+
+    preds = jnp.squeeze(decoders[3](p_m), -1) # cut out hidden dimension
+    preds = jax.nn.softmax(preds) #THIS IS NEW
+    jax.debug.print("final preds: {}", preds)
+    #to = to.max(from+edge)
+    #jax.debug.print("preds post-max: {}", preds)
+    #breakpoint()
+
+    ## TODO if cse if this doesn't work. instead of jnp.maximum, another decoder.
+    #decoders.for
+
+    if inf_bias:
+      per_batch_min = jnp.min(preds, axis=range(1, preds.ndim), keepdims=True)
+      preds = jnp.where(adj_mat > 0.5,
+                        preds,
+                        jnp.minimum(-1.0, per_batch_min - 1.0))
+    if t == _Type.PERMUTATION_POINTER:
+      if repred:  # testing or validation, no Gumbel noise
+        preds = log_sinkhorn(
+            x=preds, steps=10, temperature=0.1,
+            zero_diagonal=True, noise_rng_key=None)
+      else:  # training, add Gumbel noise
+        preds = log_sinkhorn(
+            x=preds, steps=10, temperature=0.1,
+            zero_diagonal=True, noise_rng_key=hk.next_rng_key())
+  elif t in [_Type.POINTER, _Type.PERMUTATION_POINTER]:
     p_1 = decoders[0](h_t) # from vector
     p_2 = decoders[1](h_t) # to vector  shape [batch,nodes,hidden]
     p_3 = decoders[2](edge_fts) # edge features [batch,nodes,nodes,hidden]
@@ -270,8 +307,6 @@ def _decode_node_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
     #to = to.max(from+edge)
     jax.debug.print("preds post-max: {}", preds)
     #breakpoint()
-
-    ## TODO if cse if this doesn't work. instead of jnp.maximum, another decoder.
     #decoders.for
 
     if inf_bias:
