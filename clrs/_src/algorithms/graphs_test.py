@@ -21,6 +21,11 @@ from absl.testing import absltest
 from clrs._src.algorithms import graphs
 import numpy as np
 
+TRIANGLE = np.array([
+    [0, 1, 1],
+    [1, 0, 1],
+    [1, 1, 0]
+])
 
 # Unweighted graphs.
 

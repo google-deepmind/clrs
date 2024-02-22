@@ -195,8 +195,8 @@ def postprocess(spec: _Spec, preds: Dict[str, _Array],
       if hard:
         data = jax.nn.one_hot(jnp.argmax(data, axis=-1), data.shape[-1])
     elif t == _Type.DOBRIK_AND_DANILO:
-      data = jax.nn.softmax(data)
-      #pass # DO WE DO ANYTHING HERE?
+      data = jax.nn.softmax(data) # verify shape=[batch,nodes,nodes]
+      # values should be logits?
     else:
       raise ValueError("Invalid type")
     result[name] = probing.DataPoint(
@@ -267,7 +267,7 @@ def _decode_node_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
     # computed elementwise max of (to_i + edge_ij, from_i)
 
     preds = jnp.squeeze(decoders[3](p_m), -1) # cut out hidden dimension
-    preds = jax.nn.softmax(preds) #THIS IS NEW
+    #preds = jax.nn.softmax(preds) #THIS IS NEW
     jax.debug.print("final preds: {}", preds)
     #to = to.max(from+edge)
     #jax.debug.print("preds post-max: {}", preds)
