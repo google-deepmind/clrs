@@ -77,7 +77,7 @@ WEIGHTED_DAG = np.array([
 
 WEIGHTED_DIRECTED = np.array([
     [X, 9, 3, X, X],
-    [X, X, 6, X, 2],
+    [X, X, 6, X, 1],
     [X, 2, X, 1, X],
     [X, X, 2, X, 2],
     [X, X, X, X, X],
@@ -189,6 +189,7 @@ class GraphsTest(absltest.TestCase):
   def test_bellman_ford(self):
     expected = np.array([0, 2, 0, 2, 3])
     out, _ = graphs.bellman_ford(WEIGHTED_DIRECTED, 0)
+    print(out)
     np.testing.assert_array_equal(expected, out)
 
   def test_dag_shortest_paths(self):
