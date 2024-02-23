@@ -16,12 +16,15 @@
 
 from typing import Dict, List, Tuple
 import chex
+import numpy as np
+
 from clrs._src import probing
 from clrs._src import specs
 
 import haiku as hk
 import jax
 import jax.numpy as jnp
+import torch # try to use torch kl implementation
 
 _Array = chex.Array
 _DataPoint = probing.DataPoint
@@ -129,8 +132,13 @@ def output_loss(truth: _DataPoint, pred: _Array, nb_nodes: int) -> float:
     #pred = jnp.maximum(pred, 0)
     #pred = jax.nn.softmax(pred)
     epsilon = 1e-8 # Add a small epsilon to avoid taking the logarithm of zero
-    jax.debug.print('losses.py, truth.data: {}', truth.data)
-    total_loss = -jnp.sum(jnp.sum(truth.data * jnp.log((pred+epsilon)/(truth.data+epsilon)), axis=-1))
+    jax.debug.print('losses.py, truth.data: \n {}', truth.data)
+    jax.debug.print('losses.py, exppred: \n {}', jnp.exp(pred))
+    total_loss = -jnp.sum(jnp.sum(jax.scipy.special.kl_div(truth.data, pred)))
+    #total_loss = -jnp.sum(jnp.sum(truth.data * jnp.log((jnp.exp(pred)+epsilon)/(truth.data+epsilon)), axis=-1)) # Todo email dobrik why nans
+    #pred = np.asarray(pred)
+    #pred = torch.from_numpy(pred).cuda()
+    # total_loss = torch.nn.KLDivLoss(reduction="batchmean")(pred, truth.data) # can't use this since jax
     jax.debug.print('losses.py, total_loss: {}', total_loss)
     breakpoint()
     print('loss end')
@@ -221,7 +229,7 @@ def _hint_loss(
     loss = -jnp.sum(truth_data * pred, axis=-1)
 
   elif truth_type_ == _Type.DOBRIK_AND_DANILO:
-    #TODO test!
+    raise('unimplemented')#TODO test!
     # Predictions are NxN probabilities.
     # Compute the KL divergence between predictions and 'true' distribution
     loss = -jnp.sum(truth_data * jnp.log(pred/truth_data), axis=-1)
