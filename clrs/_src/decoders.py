@@ -267,7 +267,7 @@ def _decode_node_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
     # computed elementwise max of (to_i + edge_ij, from_i)
 
     preds = jnp.squeeze(decoders[3](p_m), -1) # cut out hidden dimension
-    preds = jax.nn.softmax(preds) #THIS IS NEW
+    #preds = jax.nn.softmax(preds) #THIS IS NEW
     #jax.debug.print("final preds: {}", preds)
     #to = to.max(from+edge)
     #jax.debug.print("preds post-max: {}", preds)

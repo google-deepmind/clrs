@@ -122,26 +122,30 @@ def output_loss(truth: _DataPoint, pred: _Array, nb_nodes: int) -> float:
     total_loss = jnp.mean(-jnp.sum(truth.data * pred, axis=-1))
 
   elif truth.type_ == _Type.DOBRIK_AND_DANILO:
-    #TODO test!
+    #TODO test! if crashes, jax.nn.log_softmax()
     # Predictions are NxN probabilities.
     # Compute the KL divergence between predictions and 'true' distribution
-    print('loss begin')
+    #print('loss begin')
     # filter predictions >1 to 1
     #pred = jnp.minimum(pred, 1)
     # filter predictions <0 to 0
     #pred = jnp.maximum(pred, 0)
     #pred = jax.nn.softmax(pred)
     epsilon = 1e-8 # Add a small epsilon to avoid taking the logarithm of zero
-    jax.debug.print('losses.py, truth.data: \n {}', truth.data)
-    jax.debug.print('losses.py, exppred: \n {}', jnp.exp(pred))
-    total_loss = -jnp.sum(jnp.sum(jax.scipy.special.kl_div(truth.data, pred)))
+    #jax.debug.print('losses.py, truth.data: \n {}', truth.data)
+    #jax.debug.print('losses.py, pred: \n {}', pred)
+    pred = jax.nn.softmax(pred)
+    unreduced_loss = jax.scipy.special.kl_div(truth.data, pred+epsilon)
+    total_loss = jnp.mean(unreduced_loss)
+    #total_loss = total_loss + 0.01regularisationloss #kl divergence to uniform dist.
+    ##Todo: log implementation of both, if we get crazy losses
     #total_loss = -jnp.sum(jnp.sum(truth.data * jnp.log((jnp.exp(pred)+epsilon)/(truth.data+epsilon)), axis=-1)) # Todo email dobrik why nans
     #pred = np.asarray(pred)
     #pred = torch.from_numpy(pred).cuda()
     # total_loss = torch.nn.KLDivLoss(reduction="batchmean")(pred, truth.data) # can't use this since jax
-    jax.debug.print('losses.py, total_loss: {}', total_loss)
-    breakpoint()
-    print('loss end')
+    #jax.debug.print('losses.py, total_loss: {}', total_loss)
+    #jax.debug.breakpoint()
+    #print('loss end')
 
   return total_loss  # pytype: disable=bad-return-type  # jnp-type
 
