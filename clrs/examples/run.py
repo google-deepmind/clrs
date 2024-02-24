@@ -529,7 +529,7 @@ def main(unused_argv):
 
   logging.info('Restoring best model from checkpoint...')
   eval_model.restore_model('best.pkl', only_load_processor=False)
-  breakpoint()
+  #breakpoint()
 
   print('run.py doing logging?')
   for algo_idx in range(len(train_samplers)):
