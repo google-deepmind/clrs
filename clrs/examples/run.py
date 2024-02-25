@@ -49,13 +49,13 @@ flags.DEFINE_boolean('enforce_permutations', True,
                      'Whether to enforce permutation-type node pointers.')
 flags.DEFINE_boolean('enforce_pred_as_input', True,
                      'Whether to change pred_h hints into pred inputs.')
-flags.DEFINE_integer('batch_size', 1, 'Batch size used for training.')
+flags.DEFINE_integer('batch_size', 32, 'Batch size used for training.')
 flags.DEFINE_boolean('chunked_training', False,
                      'Whether to use chunking for training.')
 flags.DEFINE_integer('chunk_length', 16,
                      'Time chunk length used for training (if '
                      '`chunked_training` is True.')
-flags.DEFINE_integer('train_steps', 100, 'Number of training iterations.')
+flags.DEFINE_integer('train_steps', 10000, 'Number of training iterations.')
 flags.DEFINE_integer('eval_every', 50, 'Evaluation frequency (in steps).')
 flags.DEFINE_integer('test_every', 500, 'Evaluation frequency (in steps).')
 
@@ -203,7 +203,7 @@ def make_sampler(length: int,
     if infinite samples), and the spec.
   """
   if length < 0:  # load from file
-    print('run.py loading from dataset')
+    #print('run.py loading from dataset')
     dataset_folder = _maybe_download_dataset(FLAGS.dataset_path)
     sampler, num_samples, spec = clrs.create_dataset(folder=dataset_folder,
                                                      algorithm=algorithm,
@@ -381,13 +381,13 @@ def main(unused_argv):
   rng = np.random.RandomState(FLAGS.seed)
   rng_key = jax.random.PRNGKey(rng.randint(2**32))
 
-  print('calling create samplers')
+ # print('calling create samplers')
   # Create samplers
   (train_samplers,
    val_samplers, val_sample_counts,
    test_samplers, test_sample_counts,
    spec_list) = create_samplers(rng, train_lengths)
-  print('run.py made samplers')
+ # print('run.py made samplers')
 
   processor_factory = clrs.get_processor_factory(
       FLAGS.processor_type,
@@ -428,7 +428,7 @@ def main(unused_argv):
 
   #exit(0)
 
-  print('run.py starting training')
+ # print('run.py starting training')
 
   # Training loop.
   best_score = -1.0
@@ -443,7 +443,7 @@ def main(unused_argv):
   while step < FLAGS.train_steps:
     feedback_list = [next(t) for t in train_samplers]
     # check after feedback list what we get is ground-truth probabilities
-    print('run.py, feedback_list[0]', feedback_list[0])
+   # print('run.py, feedback_list[0]', feedback_list[0])
     #breakpoint()
 
     # Initialize model.
@@ -460,7 +460,7 @@ def main(unused_argv):
       else:
         train_model.init(all_features, FLAGS.seed + 1)
 
-    print('run.py model initialized')
+   # print('run.py model initialized')
     # Training step.
     for algo_idx in range(len(train_samplers)):
       feedback = feedback_list[algo_idx]
@@ -529,9 +529,9 @@ def main(unused_argv):
 
   logging.info('Restoring best model from checkpoint...')
   eval_model.restore_model('best.pkl', only_load_processor=False)
-  breakpoint()
+ # breakpoint()
 
-  print('run.py doing logging?')
+ # print('run.py doing logging?')
   for algo_idx in range(len(train_samplers)):
     common_extras = {'examples_seen': current_train_items[algo_idx],
                      'step': step,
