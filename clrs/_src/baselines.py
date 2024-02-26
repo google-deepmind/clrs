@@ -489,6 +489,10 @@ class BaselineModel(model.Model):
     with open(path, 'wb') as f:
       pickle.dump(to_save, f)
 
+  def save_model_to_permanent_file(self, file_name: str):
+      to_save = {'params': self.params, 'opt_state': self.opt_state}
+      with open(file_name, 'wb') as f:
+          pickle.dump(to_save, f)
 
 class BaselineModelChunked(BaselineModel):
   """Model that processes time-chunked data.

@@ -20,6 +20,7 @@ import os
 import shutil
 from typing import Any, Dict, List
 
+import torch
 from absl import app
 from absl import flags
 from absl import logging
@@ -28,6 +29,11 @@ import jax
 import numpy as np
 import requests
 import tensorflow as tf
+
+#NEW
+import pandas as pd # saving results to dataframe for easy visualization
+import time         # measuring model training time
+import pickle       # saving model on kaggle
 
 
 flags.DEFINE_list('algorithms', ['dfs'], 'Which algorithms to run.')
@@ -49,13 +55,13 @@ flags.DEFINE_boolean('enforce_permutations', True,
                      'Whether to enforce permutation-type node pointers.')
 flags.DEFINE_boolean('enforce_pred_as_input', True,
                      'Whether to change pred_h hints into pred inputs.')
-flags.DEFINE_integer('batch_size', 32, 'Batch size used for training.')
+flags.DEFINE_integer('batch_size', 1, 'Batch size used for training.')
 flags.DEFINE_boolean('chunked_training', False,
                      'Whether to use chunking for training.')
 flags.DEFINE_integer('chunk_length', 16,
                      'Time chunk length used for training (if '
                      '`chunked_training` is True.')
-flags.DEFINE_integer('train_steps', 10000, 'Number of training iterations.')
+flags.DEFINE_integer('train_steps', 10, 'Number of training iterations.')
 flags.DEFINE_integer('eval_every', 50, 'Evaluation frequency (in steps).')
 flags.DEFINE_integer('test_every', 500, 'Evaluation frequency (in steps).')
 
@@ -118,6 +124,14 @@ flags.DEFINE_string('dataset_path', '/tmp/CLRS30',
                     'Path in which dataset is stored.')
 flags.DEFINE_boolean('freeze_processor', False,
                      'Whether to freeze the processor of the model.')
+
+# NEW
+flags.DEFINE_boolean(name='results_df', default=False,
+                     help='Whether to save loss per step in df for plotting.')
+flags.DEFINE_boolean('save_model_to_file', False,
+                     'Whether to save model to .pkl or similar, intended for kaggle')
+flags.DEFINE_boolean('save_df', False,
+                     'Whether to save model. !! Requires results_df=True !!')
 
 FLAGS = flags.FLAGS
 
@@ -376,6 +390,12 @@ def main(unused_argv):
   else:
     raise ValueError('Hint mode not in {encoded_decoded, decoded_only, none}.')
 
+  if FLAGS.results_df:
+      RESULTS = {} # for a model, save best_val_error, test_error, and train time
+      PRE_DF_RESULTS = ([['Train KlDiv', 'Val MAE', 'Num Steps',
+                                         'Examples Seen']])
+
+
   train_lengths = [int(x) for x in FLAGS.train_lengths]
 
   rng = np.random.RandomState(FLAGS.seed)
@@ -430,6 +450,7 @@ def main(unused_argv):
 
  # print('run.py starting training')
 
+  train_start_time = time.time()
   # Training loop.
   best_score = -1.0
   current_train_items = [0] * len(FLAGS.algorithms)
@@ -507,6 +528,15 @@ def main(unused_argv):
                      FLAGS.algorithms[algo_idx], step, val_stats)
         val_scores[algo_idx] = val_stats['score']
 
+        if FLAGS.results_df:
+            # train_loss:= cur_loss, val_score := sum(val_scores), test_score is not-yet calculable
+            # epoch is num_train_steps?
+            this_result = [cur_loss, sum(val_scores), step, current_train_items[algo_idx]]
+            #{'Train KlDiv': cur_loss, 'Val MAE': sum(val_scores), 'Num Steps': step,
+            #                            'Examples Seen': current_train_items[algo_idx]}])
+            PRE_DF_RESULTS.append(this_result)
+            #breakpoint()
+
       next_eval += FLAGS.eval_every
 
       # If best total score, update best checkpoint.
@@ -526,6 +556,9 @@ def main(unused_argv):
 
     step += 1
     length_idx = (length_idx + 1) % len(train_lengths)
+
+    train_end_time = time.time()
+    train_time = train_end_time-train_start_time # timing includes occasional validation and checkpointing
 
   logging.info('Restoring best model from checkpoint...')
   eval_model.restore_model('best.pkl', only_load_processor=False)
@@ -547,6 +580,17 @@ def main(unused_argv):
         extras=common_extras)
     logging.info('(test) algo %s : %s', FLAGS.algorithms[algo_idx], test_stats)
 
+  if FLAGS.results_df:
+      RESULTS['run0'] = (train_time, best_score) # best_score given by highest val score, which is MAE by EVAL_FN
+      DF_RESULTS = pd.DataFrame(PRE_DF_RESULTS)
+      if FLAGS.save_df:
+          DF_RESULTS.to_csv('results-UPDATEMYNAME.csv', encoding='utf-8')
+
+  if FLAGS.save_model_to_file: #saving full model. Remember to call loadel_model.eval() on loaded model if you want to do inference
+      ## doesnt worKtorch.save(eval_model.state_dict(), 'best_model_state_dict.pth') # saves eval_model to PATH='best_model.pth'
+      eval_model.save_model_to_permanent_file('eval_model_pickle-UPDATEMYNAME.pkl')
+      ## load with filepointer! look at baselines.py restore_model for example
+  #breakpoint()
   logging.info('Done!')
 
 
