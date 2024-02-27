@@ -297,7 +297,7 @@ def _decode_node_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
 
     p_e = jnp.expand_dims(p_2, -2) + p_3 # [batch,nodes,1,hidden] summed with [batch,nodes,nodes,hidden]
     # to_i  + edge_ij: [batch,nodes_i,nodes_j,hidden]
-    jax.debug.print("preds before max: {}", p_e)
+    #jax.debug.print("preds before max: {}", p_e)
     p_m = jnp.maximum(jnp.expand_dims(p_1, -2), # [batch,nodes_i,1,hidden] -> [batch,nodes_i,nodes_i,hidden]
                       jnp.transpose(p_e, (0, 2, 1, 3))) # [batch, nodes_j, nodes_i, hidden]
     #p_m shape [batch, nodes_j, nodes_i, hidden]
@@ -305,7 +305,7 @@ def _decode_node_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
 
     preds = jnp.squeeze(decoders[3](p_m), -1) # cut out hidden dimension
     #to = to.max(from+edge)
-    jax.debug.print("preds post-max: {}", preds)
+    #jax.debug.print("preds post-max: {}", preds)
     #breakpoint()
     #decoders.for
 

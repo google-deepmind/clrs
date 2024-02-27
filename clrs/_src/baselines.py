@@ -329,7 +329,7 @@ class BaselineModel(model.Model):
         repred=True, algorithm_index=algorithm_index,
         return_hints=return_hints,
         return_all_outputs=return_all_outputs)
-    print(outs) # EDITED
+    #print(outs) # EDITED
     outs = decoders.postprocess(self._spec[algorithm_index],
                                 outs,
                                 sinkhorn_temperature=0.1,
