@@ -61,8 +61,8 @@ flags.DEFINE_boolean('chunked_training', False,
 flags.DEFINE_integer('chunk_length', 16,
                      'Time chunk length used for training (if '
                      '`chunked_training` is True.')
-flags.DEFINE_integer('train_steps', 10, 'Number of training iterations.')
-flags.DEFINE_integer('eval_every', 50 , 'Evaluation frequency (in steps).')
+flags.DEFINE_integer('train_steps', 100, 'Number of training iterations.')
+flags.DEFINE_integer('eval_every', 5 , 'Evaluation frequency (in steps).')
 flags.DEFINE_integer('test_every', 500, 'Evaluation frequency (in steps).')
 
 flags.DEFINE_integer('hidden_size', 128,
@@ -128,10 +128,11 @@ flags.DEFINE_boolean('freeze_processor', False,
 # NEW
 flags.DEFINE_boolean(name='results_df', default=False,
                      help='Whether to save loss per step in df for plotting.')
-flags.DEFINE_boolean('save_model_to_file', False,
-                     'Whether to save model to .pkl or similar, intended for kaggle')
 flags.DEFINE_boolean('save_df', False,
                      'Whether to save model. !! Requires results_df=True !!')
+flags.DEFINE_boolean('save_model_to_file', False,
+                     'Whether to save model to .pkl or similar, intended for kaggle')
+
 
 FLAGS = flags.FLAGS
 
