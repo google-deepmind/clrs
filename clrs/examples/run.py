@@ -585,7 +585,7 @@ def main(unused_argv):
       RESULTS['run0'] = (train_time, best_score) # best_score given by highest val score, which is MAE by EVAL_FN
       DF_RESULTS = pd.DataFrame(PRE_DF_RESULTS)
       if FLAGS.save_df:
-          DF_RESULTS.to_csv('results-UPDATEMYNAME.csv', encoding='utf-8')
+          DF_RESULTS.to_csv('NEW-results-UPDATEMYNAME.csv', encoding='utf-8', index=False)
 
   if FLAGS.save_model_to_file: #saving full model. Remember to call loadel_model.eval() on loaded model if you want to do inference
       ## doesnt worKtorch.save(eval_model.state_dict(), 'best_model_state_dict.pth') # saves eval_model to PATH='best_model.pth'
