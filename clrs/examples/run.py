@@ -61,7 +61,7 @@ flags.DEFINE_boolean('chunked_training', False,
 flags.DEFINE_integer('chunk_length', 16,
                      'Time chunk length used for training (if '
                      '`chunked_training` is True.')
-flags.DEFINE_integer('train_steps', 1000, 'Number of training iterations.')
+flags.DEFINE_integer('train_steps', 500, 'Number of training iterations.')
 flags.DEFINE_integer('eval_every', 50, 'Evaluation frequency (in steps).')
 flags.DEFINE_integer('test_every', 500, 'Evaluation frequency (in steps).')
 
@@ -585,7 +585,7 @@ def main(unused_argv):
       RESULTS['run0'] = (train_time, best_score) # best_score given by highest val score, which is MAE by EVAL_FN
       DF_RESULTS = pd.DataFrame(PRE_DF_RESULTS)
       if FLAGS.save_df:
-          DF_RESULTS.to_csv('1000-results-UPDATEMYNAME.csv', encoding='utf-8', index=False)
+          DF_RESULTS.to_csv('score-results-UPDATEMYNAME.csv', encoding='utf-8', index=False)
 
   if FLAGS.save_model_to_file: #saving full model. Remember to call loadel_model.eval() on loaded model if you want to do inference
       ## doesnt worKtorch.save(eval_model.state_dict(), 'best_model_state_dict.pth') # saves eval_model to PATH='best_model.pth'

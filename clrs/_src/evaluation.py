@@ -20,6 +20,7 @@ import chex
 from clrs._src import probing
 from clrs._src import specs
 import numpy as np
+import jax # for kldiv
 
 
 _Array = chex.Array
@@ -140,6 +141,7 @@ def evaluate(
     assert truth.name in predictions
     pred = predictions[truth.name]
     evals[truth.name] = _evaluate(truth, pred)
+    #breakpoint()
   # Return a single scalar score that is the mean of all output scores.
   evals['score'] = sum([v.item() for v in evals.values()]) / len(evals)
   return evals
@@ -209,5 +211,12 @@ _EVAL_FN = {
     specs.Type.POINTER:
         lambda pred, truth: np.mean((pred == truth) * 1.0),
     specs.Type.DOBRIK_AND_DANILO:
-        lambda pred, truth: np.mean(np.abs(pred - truth) * 1.0), #_eval_one
+        #FIXME eval scores best model based on highest score. We compute loss.
+        #lambda pred, truth: np.mean(jax.scipy.special.kl_div(truth, pred)) FIXME! KL div has high values
+        #lambda pred, truth: np.sum(truth * np.log((pred + 1e-8)/(truth + 1e-8))) # when truth is 0, inflates too much.
+        #lambda pred, truth: -np.sum(truth * np.log(truth/pred+1e-8)) # pred 2less likely to be 0? more stable?
+        #lambda pred, truth: np.sum(truth * (np.log(truth) - log(pred)))
+        #lambda pred, truth: np.mean(np.abs(pred - truth) * 1.0), #_eval_one ##FIXME! Change to KLDIV
+        #### Try proximity? maximizing 1-np.abs(pred-truth)
+        lambda pred, truth: np.mean(1-np.abs(pred-truth)) # 1 - error. Report mean: typically, off by what
 }
