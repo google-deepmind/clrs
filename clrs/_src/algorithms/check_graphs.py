@@ -1,9 +1,21 @@
 import graphlib as gl
 import networkit as nt
+import pandas as pd
 
 # cyclic graph to test
-cyclic = [2,0,1]
-acyclic = [-1, 0]
+cyclic_adj = [
+    [0,1,0],
+    [0,0,1],
+    [1,0,0]
+]
+cyclic_pi = [2,0,1]
+
+acyclic_adj = [
+    [0,1],
+    [0,0]
+]
+acyclic_pi = [0, 0]
+
 def is_acyclic(input, pi):
     """
     Function to check for cycles in a predecessor array returned by the model
@@ -20,10 +32,10 @@ def is_acyclic(input, pi):
     graph = nt.graph.Graph(n = len(pi), directed = True)
     for i in range(len(pi)):
         for j in range(len(pi)):
-            if input[i,j] == 1:
+            if input[i][j] == 1:
                 graph.addEdge(i,j)
     # no self-loop on the start node
-    pi[0] = -1
+    #pi[0] = -1
 
     # check self-looping conditions
     if is_valid_self_loops(input, pi):
@@ -32,6 +44,8 @@ def is_acyclic(input, pi):
                 pi[i] = -1
     else:
         return False
+
+    print(pi)
 
 
 
@@ -65,8 +79,6 @@ def is_valid_self_loops(input, pi):
                 simple_paths = paths.numberOfSimplePaths()
                 if simple_paths > 0:
                     return False
-                else:
-                    pi[i] = -1
     return True
 
-print(is_acyclic(acyclic))
+print(is_acyclic(acyclic_adj, acyclic_pi))
