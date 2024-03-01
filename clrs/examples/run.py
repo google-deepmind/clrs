@@ -34,6 +34,9 @@ import tensorflow as tf
 import pandas as pd # saving results to dataframe for easy visualization
 import time         # measuring model training time
 import pickle       # saving model on kaggle
+import os
+
+os.environ['KMP_DUPLICATE_LIB_OK']='TRUE'
 
 from clrs import _src
 from clrs._src.algorithms import check_graphs
@@ -310,6 +313,7 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
     # 1. Sample from preds a candidate tree
     # 2. run check_graphs on candidate tree (using A as groundtruth)
     # 3. Collect validity result into a dataframe.
+  print(preds[0])
   model_sample_argmax = [sample_argmax(dist) for dist in preds["pi"].data]
   true_sample_argmax = [sample_argmax(output) for output in outputs[0].data]
 
