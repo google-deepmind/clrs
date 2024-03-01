@@ -1,6 +1,5 @@
 import graphlib as gl
-import networkit as nt
-import pandas as pd
+import networkx as nx
 
 ## f[0][0][1].data to get adjacency matrix from next(sampler) where sampler=test_samplers[0]
 
@@ -31,11 +30,12 @@ def is_acyclic(input, pi):
         # if no: replace its parent by the god node -1
 
     # Build networkit graph
-    graph = nt.graph.Graph(n = len(pi), directed = True)
+    graph = nx.DiGraph()
+    graph.add_nodes_from(range(len(pi)))
     for i in range(len(pi)):
         for j in range(len(pi)):
             if input[i][j] == 1:
-                graph.addEdge(i,j)
+                graph.add_edge(i,j)
     # no self-loop on the start node
     #pi[0] = -1
 
@@ -77,10 +77,11 @@ def is_valid_self_loops(input, pi):
     for i in range(len(pi)):
         if pi[i] == i:
             for j in range(i):
-                paths = nt.reachability.AllSimplePaths(input, j, i)
+                paths = nx.has_path(input, j, i)
                 simple_paths = paths.numberOfSimplePaths()
                 if simple_paths > 0:
                     return False
     return True
 
 print(is_acyclic(acyclic_adj, acyclic_pi))
+print(is_acyclic(cyclic_adj, cyclic_pi))
