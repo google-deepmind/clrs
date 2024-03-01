@@ -2,6 +2,8 @@ import graphlib as gl
 import networkit as nt
 import pandas as pd
 
+## f[0][0][1].data to get adjacency matrix from next(sampler) where sampler=test_samplers[0]
+
 # cyclic graph to test
 cyclic_adj = [
     [0,1,0],

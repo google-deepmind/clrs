@@ -35,6 +35,8 @@ import pandas as pd # saving results to dataframe for easy visualization
 import time         # measuring model training time
 import pickle       # saving model on kaggle
 
+from clrs import _src
+from clrs._src.algorithms import check_graphs
 
 flags.DEFINE_list('algorithms', ['dfs'], 'Which algorithms to run.')
 flags.DEFINE_list('train_lengths', ['4', '7', '11', '13', '16'],
@@ -61,7 +63,7 @@ flags.DEFINE_boolean('chunked_training', False,
 flags.DEFINE_integer('chunk_length', 16,
                      'Time chunk length used for training (if '
                      '`chunked_training` is True.')
-flags.DEFINE_integer('train_steps', 500, 'Number of training iterations.')
+flags.DEFINE_integer('train_steps', 100, 'Number of training iterations.')
 flags.DEFINE_integer('eval_every', 50, 'Evaluation frequency (in steps).')
 flags.DEFINE_integer('test_every', 500, 'Evaluation frequency (in steps).')
 
@@ -287,6 +289,66 @@ def collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
     out.update(extras)
   return {k: unpack(v) for k, v in out.items()}
 
+def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
+  """Collect batch of output preds and evaluate them."""
+  processed_samples = 0
+  preds = []
+  outputs = []
+  As = []
+  while processed_samples < sample_count:
+    feedback = next(sampler)
+    batch_size = feedback.outputs[0].data.shape[0]
+    outputs.append(feedback.outputs)
+    new_rng_key, rng_key = jax.random.split(rng_key)
+    cur_preds, _ = predict_fn(new_rng_key, feedback.features)
+    preds.append(cur_preds)
+    processed_samples += batch_size
+    As.append(feedback[0][0][1].data)
+  outputs = _concat(outputs, axis=0)
+
+  ### We need preds and A. We want to
+    # 1. Sample from preds a candidate tree
+    # 2. run check_graphs on candidate tree (using A as groundtruth)
+    # 3. Collect validity result into a dataframe.
+  model_sample_argmax = sample_argmax(preds)
+  true_sample_argmax = sample_argmax(outputs)
+
+  # compute the fraction of trees sampled from model output fulfilling the necessary conditions
+  model_argmax_truthmask = [check_graphs.is_acyclic(As[i],model_sample_argmax[i]) for i in range(len(model_sample_argmax))]
+  error_model_argmax = sum(model_argmax_truthmask) / len(model_sample_argmax)
+
+  # compute the fraction of trees sampled from true distributions fulfilling the necessary conditions
+  true_argmax_truthmask = [check_graphs.is_acyclic(As[i], true_sample_argmax[i]) for i in range(len(true_sample_argmax))]
+  error_true_argmax = sum(true_argmax_truthmask) / len(true_sample_argmax)
+
+  result_dict = {"As":As, "Model_Mask" : model_argmax_truthmask, "True_Mask" : true_argmax_truthmask, "Model_Accuracy": error_model_argmax, "True_Accuracy":error_true_argmax}
+  result_df = pd.DataFrame.from_dict(result_dict)
+  result_df.to_csv('accuracy.csv', encoding='utf-8', index=False)
+
+
+
+  #TODO implement me
+  #sample_upwards = sample_upwards(preds)
+  #true_sample_upwards = sample_upwards(outputs)
+  ###
+    # sample argmax
+    # sample upwards
+    # sample true distribution. Distinguish error of sampling method from error from NNs.
+
+  ###
+  preds = _concat(preds, axis=0)
+  out = clrs.evaluate(outputs, preds)
+
+
+  #breakpoint()
+  if extras:
+    out.update(extras)
+  return {k: unpack(v) for k, v in out.items()}
+
+
+def sample_argmax(probs):
+    print(np.argmax(probs, axis=0))
+    return np.argmax(probs, axis=0)
 
 def create_samplers(rng, train_lengths: List[int]):
   """Create all the samplers."""
@@ -573,7 +635,15 @@ def main(unused_argv):
 
     new_rng_key, rng_key = jax.random.split(rng_key)
     #breakpoint()
-    test_stats = collect_and_eval(
+    if FLAGS.algorithms[algo_idx] == "dfs":
+        test_stats = DFS_collect_and_eval(
+            test_samplers[algo_idx],
+            functools.partial(eval_model.predict, algorithm_index=algo_idx),
+            test_sample_counts[algo_idx],
+            new_rng_key,
+            extras=common_extras)
+    else:
+        test_stats = collect_and_eval(
         test_samplers[algo_idx],
         functools.partial(eval_model.predict, algorithm_index=algo_idx),
         test_sample_counts[algo_idx],
