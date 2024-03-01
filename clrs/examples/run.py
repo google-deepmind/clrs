@@ -314,9 +314,9 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
     # 2. run check_graphs on candidate tree (using A as groundtruth)
     # 3. Collect validity result into a dataframe.
 
-  model_sample_argmax = sample_argmax(preds)
+  model_sample_argmax = sample_argmax_pred(preds)
   print(outputs)
-  true_sample_argmax = sample_argmax(outputs)
+  true_sample_argmax = sample_argmax_output(outputs)
 
   # compute the fraction of trees sampled from model output fulfilling the necessary conditions
   model_argmax_truthmask = [check_graphs.is_acyclic(As[i],model_sample_argmax[i]) for i in range(len(model_sample_argmax))]
@@ -351,7 +351,18 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
   return {k: unpack(v) for k, v in out.items()}
 
 
-def sample_argmax(preds):
+def sample_argmax_pred(preds):
+    trees = []
+    for i in preds:
+        distlist = i.data
+        for prob in distlist:
+            amax = np.argmax(prob, axis=0)
+            print(amax)
+            trees.append(amax)
+    return trees
+
+
+def sample_argmax_output(preds):
     trees = []
     for i in preds:
         distlist = i["pi"].data
