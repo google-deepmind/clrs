@@ -308,21 +308,25 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
     processed_samples += batch_size
     As.append(feedback[0][0][1].data)
   outputs = _concat(outputs, axis=0)
+  As = _concat(As, axis=0) # concatenate batches
 
   ### We need preds and A. We want to
     # 1. Sample from preds a candidate tree
     # 2. run check_graphs on candidate tree (using A as groundtruth)
     # 3. Collect validity result into a dataframe.
 
-  model_sample_argmax = sample_argmax(preds)
-  true_sample_argmax = sample_argmax(outputs)
+  model_sample_argmax = sample_argmax_listofdict(preds)
+  true_sample_argmax = sample_argmax_listofdatapoint(outputs)
+  ## convert from jax arrays to lists for easy subsequent methods
+
+  breakpoint()
 
   # compute the fraction of trees sampled from model output fulfilling the necessary conditions
-  model_argmax_truthmask = [check_graphs.is_acyclic(As[i],model_sample_argmax[i]) for i in range(len(model_sample_argmax))]
+  model_argmax_truthmask = [check_graphs.is_acyclic(As[i],model_sample_argmax[i].tolist()) for i in range(len(model_sample_argmax))]
   error_model_argmax = sum(model_argmax_truthmask) / len(model_sample_argmax)
 
   # compute the fraction of trees sampled from true distributions fulfilling the necessary conditions
-  true_argmax_truthmask = [check_graphs.is_acyclic(As[i], true_sample_argmax[i]) for i in range(len(true_sample_argmax))]
+  true_argmax_truthmask = [check_graphs.is_acyclic(As[i], true_sample_argmax[i].tolist()) for i in range(len(true_sample_argmax))]
   error_true_argmax = sum(true_argmax_truthmask) / len(true_sample_argmax)
 
   result_dict = {"As":As, "Model_Mask" : model_argmax_truthmask, "True_Mask" : true_argmax_truthmask, "Model_Accuracy": error_model_argmax, "True_Accuracy":error_true_argmax}
@@ -350,10 +354,20 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
   return {k: unpack(v) for k, v in out.items()}
 
 
-def sample_argmax(preds):
+def sample_argmax_listofdict(preds):
     trees = []
-    for i in preds:
+    for i in preds: # de-listify into dict, happens twice
         distlist = i["pi"].data
+        for prob in distlist:
+            amax = np.argmax(prob, axis=0)
+            print(amax)
+            trees.append(amax)
+    return trees
+
+def sample_argmax_listofdatapoint(outputs):
+    trees = []
+    for i in outputs: #de-listify into datapoint
+        distlist = i.data
         for prob in distlist:
             amax = np.argmax(prob, axis=0)
             print(amax)
