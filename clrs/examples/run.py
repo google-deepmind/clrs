@@ -315,7 +315,7 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
     # 3. Collect validity result into a dataframe.
   print(preds)
 
-  model_sample_argmax = [sample_argmax(dist[i]) for dist in preds[i]["pi"].data]
+  model_sample_argmax = [sample_argmax(dist) for dist in preds["pi"].data]
   true_sample_argmax = [sample_argmax(output) for output in outputs[0].data]
 
   # compute the fraction of trees sampled from model output fulfilling the necessary conditions
