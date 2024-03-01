@@ -354,7 +354,7 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
 def sample_argmax_pred(preds):
     trees = []
     for i in preds:
-        distlist = i.data
+        distlist = i["pi"].data
         for prob in distlist:
             amax = np.argmax(prob, axis=0)
             print(amax)
@@ -365,7 +365,7 @@ def sample_argmax_pred(preds):
 def sample_argmax_output(preds):
     trees = []
     for i in preds:
-        distlist = i["pi"].data
+        distlist = i.data
         for prob in distlist:
             amax = np.argmax(prob, axis=0)
             print(amax)
