@@ -18,6 +18,13 @@ acyclic_adj = np.array([
 ])
 acyclic_pi = [0, 0]
 
+disconnect_adj = np.array([
+    [0,1,0],
+    [0,0,0],
+    [0,0,0]
+])
+disconnect_pi = [0,0,2]
+
 def is_acyclic(np_input_array, pi):
     """
     Function to check for cycles in a predecessor array returned by the model
@@ -30,7 +37,7 @@ def is_acyclic(np_input_array, pi):
         # if yes: return false
         # if no: replace its parent by the god node -1
 
-    # Build networkit graph
+    # Build networkx graph
     graph = nx.DiGraph()
     graph.add_nodes_from(range(len(pi)))
     for i in range(len(pi)):
@@ -40,6 +47,7 @@ def is_acyclic(np_input_array, pi):
     # no self-loop on the start node
     #pi[0] = -1
 
+    #print('prepi, ',pi)
     # check self-looping conditions
     if is_valid_self_loops(np_input_array, pi):
         for i in range(len(pi)):
@@ -48,12 +56,12 @@ def is_acyclic(np_input_array, pi):
     else:
         return False
 
-    print(pi)
+    #print('postpi, ',pi)
 
 
 
 
-    breakpoint()
+    #breakpoint()
     ts = gl.TopologicalSorter()
     for i in range(len(pi)):
         ts.add(i, pi[i])
@@ -62,7 +70,7 @@ def is_acyclic(np_input_array, pi):
         return True
     except ValueError as e:
         if isinstance(e, gl.CycleError):
-            print("I am a cycle error")
+            #print("I am a cycle error")
             return False
         else:
             raise e
@@ -84,5 +92,7 @@ def is_valid_self_loops(np_input_array, pi):
                     return False
     return True
 
-print(is_acyclic(acyclic_adj, acyclic_pi))
-print(is_acyclic(cyclic_adj, cyclic_pi))
+#print(is_acyclic(acyclic_adj, acyclic_pi))
+#print(is_acyclic(cyclic_adj, cyclic_pi))
+
+#print(is_acyclic(disconnect_adj, disconnect_pi))

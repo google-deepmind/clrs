@@ -57,7 +57,7 @@ def dfs(A: _Array) -> _Out:
   probeslist = []
   pies = []
 
-  NUM_SOLUTIONS = 10
+  NUM_SOLUTIONS = 20
 
   for i in range(NUM_SOLUTIONS):
 
