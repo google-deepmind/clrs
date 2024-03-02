@@ -308,28 +308,34 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
     processed_samples += batch_size
     As.append(feedback[0][0][1].data)
   outputs = _concat(outputs, axis=0)
+  As = _concat(As, axis=0) # concatenate batches
 
   ### We need preds and A. We want to
     # 1. Sample from preds a candidate tree
     # 2. run check_graphs on candidate tree (using A as groundtruth)
     # 3. Collect validity result into a dataframe.
 
-  model_sample_argmax = sample_argmax_pred(preds)
-  print(outputs)
-  true_sample_argmax = sample_argmax_output(outputs)
+
+  model_sample_argmax = sample_argmax_listofdict(preds)
+  true_sample_argmax = sample_argmax_listofdatapoint(outputs)
+  ## convert from jax arrays to lists for easy subsequent methods
+
 
   # compute the fraction of trees sampled from model output fulfilling the necessary conditions
-  model_argmax_truthmask = [check_graphs.is_acyclic(As[i],model_sample_argmax[i]) for i in range(len(model_sample_argmax))]
-  error_model_argmax = sum(model_argmax_truthmask) / len(model_sample_argmax)
+  model_argmax_truthmask = [check_graphs.is_acyclic(As[i],model_sample_argmax[i].tolist()) for i in range(len(model_sample_argmax))]
+  correctness_model_argmax = sum(model_argmax_truthmask) / len(model_argmax_truthmask)
 
   # compute the fraction of trees sampled from true distributions fulfilling the necessary conditions
-  true_argmax_truthmask = [check_graphs.is_acyclic(As[i], true_sample_argmax[i]) for i in range(len(true_sample_argmax))]
-  error_true_argmax = sum(true_argmax_truthmask) / len(true_sample_argmax)
+  true_argmax_truthmask = [check_graphs.is_acyclic(As[i], true_sample_argmax[i].tolist()) for i in range(len(true_sample_argmax))]
+  correctness_true_argmax = sum(true_argmax_truthmask) / len(true_argmax_truthmask)
 
-  result_dict = {"As":As, "Model_Mask" : model_argmax_truthmask, "True_Mask" : true_argmax_truthmask, "Model_Accuracy": error_model_argmax, "True_Accuracy":error_true_argmax}
+  #breakpoint()
+  As = [i.flatten() for i in As]
+  result_dict = {"As":As, "Model_Mask" : model_argmax_truthmask, "True_Mask" : true_argmax_truthmask, "Model_Accuracy": correctness_model_argmax, "True_Accuracy":correctness_true_argmax}
   result_df = pd.DataFrame.from_dict(result_dict)
   result_df.to_csv('accuracy.csv', encoding='utf-8', index=False)
 
+  #As[0].reshape((np.sqrt(len(lAs[0])).astype(int)), np.sqrt(len(lAs[0])).astype(int))
 
 
   #TODO implement me
@@ -351,13 +357,23 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
   return {k: unpack(v) for k, v in out.items()}
 
 
-def sample_argmax_pred(preds):
+def sample_argmax_listofdict(preds):
     trees = []
-    for i in preds:
+    for i in preds: # de-listify into dict, happens twice
         distlist = i["pi"].data
         for prob in distlist:
-            amax = np.argmax(prob, axis=0)
-            print(amax)
+            amax = np.argmax(prob, axis=1)
+            #print(amax)
+            trees.append(amax)
+    return trees
+
+def sample_argmax_listofdatapoint(outputs):
+    trees = []
+    for i in outputs: #de-listify into datapoint
+        distlist = i.data
+        for prob in distlist:
+            amax = np.argmax(prob, axis=1)
+            #print(amax)
             trees.append(amax)
     return trees
 
@@ -545,6 +561,7 @@ def main(unused_argv):
   # until all algos have had at least one evaluation.
   val_scores = [-99999.9] * len(FLAGS.algorithms)
   length_idx = 0
+  TEMP = []
 
   while step < FLAGS.train_steps:
     feedback_list = [next(t) for t in train_samplers]
@@ -582,6 +599,8 @@ def main(unused_argv):
       cur_loss = train_model.feedback(rng_key, feedback, length_and_algo_idx)
       rng_key = new_rng_key
 
+      TEMP.append(cur_loss)
+
       if FLAGS.chunked_training:
         examples_in_chunk = np.sum(feedback.features.is_last).item()
       else:
@@ -616,10 +635,11 @@ def main(unused_argv):
         if FLAGS.results_df:
             # train_loss:= cur_loss, val_score := sum(val_scores), test_score is not-yet calculable
             # epoch is num_train_steps?
-            this_result = [cur_loss, sum(val_scores), step, current_train_items[algo_idx]]
+            this_result = [np.mean(TEMP), sum(val_scores), step, current_train_items[algo_idx]]
             #{'Train KlDiv': cur_loss, 'Val MAE': sum(val_scores), 'Num Steps': step,
             #                            'Examples Seen': current_train_items[algo_idx]}])
             PRE_DF_RESULTS.append(this_result)
+            TEMP = []
             #breakpoint()
 
       next_eval += FLAGS.eval_every
