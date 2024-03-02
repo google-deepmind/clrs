@@ -66,7 +66,7 @@ flags.DEFINE_boolean('chunked_training', False,
 flags.DEFINE_integer('chunk_length', 16,
                      'Time chunk length used for training (if '
                      '`chunked_training` is True.')
-flags.DEFINE_integer('train_steps', 10000, 'Number of training iterations.')
+flags.DEFINE_integer('train_steps', 1000, 'Number of training iterations.')
 flags.DEFINE_integer('eval_every', 50, 'Evaluation frequency (in steps).')
 flags.DEFINE_integer('test_every', 500, 'Evaluation frequency (in steps).')
 
@@ -318,8 +318,19 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
 
   model_sample_argmax = sample_argmax_listofdict(preds)
   true_sample_argmax = sample_argmax_listofdatapoint(outputs)
-  ## convert from jax arrays to lists for easy subsequent methods
 
+  model_sample_random = sample_random_list(preds)
+  true_sample_random = sample_random_list(outputs)
+
+  model_random_truthmask = [check_graphs.is_acyclic(As[i], model_sample_random[i]) for i in
+                            range(len(model_sample_random))]
+  correctness_model_random = sum(model_random_truthmask) / len(model_random_truthmask)
+
+  true_random_truthmask = [check_graphs.is_acyclic(As[i], true_sample_random[i]) for i in
+                           range(len(true_sample_random))]
+  correctness_true_random = sum(true_random_truthmask) / len(true_random_truthmask)
+
+  ## remember to convert from jax arrays to lists for easy subsequent methods using .tolist()
 
   # compute the fraction of trees sampled from model output fulfilling the necessary conditions
   model_argmax_truthmask = [check_graphs.is_acyclic(As[i],model_sample_argmax[i].tolist()) for i in range(len(model_sample_argmax))]
@@ -329,9 +340,15 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
   true_argmax_truthmask = [check_graphs.is_acyclic(As[i], true_sample_argmax[i].tolist()) for i in range(len(true_sample_argmax))]
   correctness_true_argmax = sum(true_argmax_truthmask) / len(true_argmax_truthmask)
 
-  #breakpoint()
+  breakpoint()
   As = [i.flatten() for i in As]
-  result_dict = {"As":As, "Model_Mask" : model_argmax_truthmask, "True_Mask" : true_argmax_truthmask, "Model_Accuracy": correctness_model_argmax, "True_Accuracy":correctness_true_argmax}
+  result_dict = {"As":As, "Model_Mask" : model_argmax_truthmask,
+                 "True_Mask" : true_argmax_truthmask,
+                 "Argmax_Model_Accuracy": correctness_model_argmax,
+                 "Argmax_True_Accuracy":correctness_true_argmax,
+                 "Random_Model_Accuracy": correctness_model_random,
+                 "Random_True_Accuracy": correctness_true_random,
+                 }
   result_df = pd.DataFrame.from_dict(result_dict)
   result_df.to_csv('accuracy.csv', encoding='utf-8', index=False)
 
@@ -377,16 +394,22 @@ def sample_argmax_listofdatapoint(outputs):
             trees.append(amax)
     return trees
 
-
-def sample_argmax_output(preds):
+def sample_random_list(outsOrPreds):
     trees = []
-    for i in preds:
-        distlist = i.data
-        for prob in distlist:
-            amax = np.argmax(prob, axis=0)
-            print(amax)
-            trees.append(amax)
+    rng = np.random.default_rng()
+    for i in outsOrPreds:
+        if type(i) == type({}):
+            distlist = i["pi"].data
+        else:
+            distlist = i.data
+        for probMatrix in distlist:
+            pi = []
+            for row in probMatrix:
+                pi.append(rng.integers(len(row)))
+            trees.append(pi)
+            #breakpoint()
     return trees
+
 
 def create_samplers(rng, train_lengths: List[int]):
   """Create all the samplers."""
@@ -493,7 +516,7 @@ def main(unused_argv):
 
   if FLAGS.results_df:
       RESULTS = {} # for a model, save best_val_error, test_error, and train time
-      PRE_DF_RESULTS = ([['Train KlDiv', 'Val MAE', 'Num Steps',
+      PRE_DF_RESULTS = ([['Train KlDiv', 'Mean 1-abs(error)', 'Num Steps',
                                          'Examples Seen']])
 
 
