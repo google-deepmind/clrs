@@ -340,7 +340,7 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
   true_argmax_truthmask = [check_graphs.is_acyclic(As[i], true_sample_argmax[i].tolist()) for i in range(len(true_sample_argmax))]
   correctness_true_argmax = sum(true_argmax_truthmask) / len(true_argmax_truthmask)
 
-  breakpoint()
+  #breakpoint()
   As = [i.flatten() for i in As]
   result_dict = {"As":As, "Model_Mask" : model_argmax_truthmask,
                  "True_Mask" : true_argmax_truthmask,
