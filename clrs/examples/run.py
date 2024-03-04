@@ -30,7 +30,7 @@ import jax
 import numpy as np
 import requests
 import tensorflow as tf
-import sklearn
+import sklearn.preprocessing
 
 #NEW
 import pandas as pd # saving results to dataframe for easy visualization
@@ -450,6 +450,21 @@ def leafinessSort(probMatrix):
     return leafiness
 
 def sample_upwards(outsOrPreds):
+    '''
+
+    Args:
+        outsOrPreds: A list of Datapoint or Dictionaries containing JaxArray Probability Matrices
+
+    Returns:
+        trees: A list of parent trees, one for each probability Matrix in unpacked outsOrPreds.
+        Each parent tree, pi, an array of length := #nodes. pi[i] = 3 indicates 3 is the parent of node i.
+
+    Data Structures:
+        distlist: A list of probability matrices
+        probMatrix: A matrix, #nodes by #nodes, where probMatrix[i][j] indicates the probability that node j is the parent of node i.
+        leafiness: A sorted list. 0th element is the node least likely to be a parent: the sum its probMatrix column is the lowest
+        pi: the candidate parent-tree being built
+    '''
     trees = []
     # PREPROCESS TO EXTRACT probMatrix
     for i in outsOrPreds:
@@ -457,41 +472,52 @@ def sample_upwards(outsOrPreds):
             distlist = i["pi"].data
         else:
             distlist = i.data
-        for probMatrix in distlist:
+        for probMatrix in distlist: # note, probMatrix is a jax ArrayImpl
+            probMatrix = np.array(probMatrix) # deepcopy to numpy so mutable
             ### COMPUTATION HERE
             #. sort by leafiness
-            leafiness = leafinessSort(probMatrix)
+            leafiness = np.asarray(leafinessSort(probMatrix)) # shallowcopy jax array to numpy array so no problems indexing
 
             # turn probmatrix into true probability dist (summing to 1)
-            altered_ProbMatrix= sklearn.preprocessing.normalize(probMatrix, axis = 1)
+            #altered_ProbMatrix= probMatrix
             #. grab most leafy, find its parent, continue till already-discovered (self-parent or prev. iter).
             pi = np.full(len(probMatrix), np.inf)
+            #breakpoint()
             while len(leafiness) > 0:
-                altered_ProbMatrix = sklearn.preprocessing.normalize(probMatrix, axis=1)
+                print('leafiness, ', leafiness)
+                altered_ProbMatrix = probMatrix/probMatrix.sum(axis=1, keepdims=True)
+                print(altered_ProbMatrix.sum(axis=1))
                 leaf = leafiness[0]
                 # sample the leafs parent
-                parent = np.random.choice([i for i in range(len(probMatrix))], p=altered_ProbMatrix[leaf])
-                pi[leaf] = parent
+                parent = np.argmax(np.random.multinomial(n=1, pvals=altered_ProbMatrix[leaf]))
+                breakpoint()
+                pi[leaf] = parent # FIXME sometimes index error
                 leafiness = np.delete(leafiness, obj = [0,parent])
-                altered_ProbMatrix[:,leaf] = 0
-                if altered_ProbMatrix != np.zeros(altered_ProbMatrix.shape):
-                    altered_ProbMatrix = sklearn.preprocessing.normalize(altered_ProbMatrix, axis=1)
+                altered_ProbMatrix[:,leaf] = 0 # set leaf's column to 0: leaf should be nobody's parent, unless there's a restart, to avoid cycles
+                breakpoint()
+                if (altered_ProbMatrix != np.zeros(altered_ProbMatrix.shape)).any(): # make sure not all 0s
+                    altered_ProbMatrix = altered_ProbMatrix/altered_ProbMatrix.sum(axis=1, keepdims=True)
+                    print(altered_ProbMatrix.sum(axis=1))
                 else:
                     break
                 # sample up the tree until parent is the start node, a self-loop or already has a parent
-                while not pi[parent] != np.inf:
+                while pi[parent] == np.inf:
                     # sample up the tree
+                    print('run.py \n', altered_ProbMatrix)
+                    breakpoint()
                     leaf = parent
-                    parent = np.random.choice([i for i in range(len(probMatrix))], p = altered_ProbMatrix[leaf])
+                    parent = np.argmax(np.random.multinomial(n=1, pvals=altered_ProbMatrix[leaf]))
                     pi[leaf] = parent
                     # remove parent as potential
                     leafiness = np.delete(leafiness, obj = [0,parent])
-                    altered_ProbMatrix[:, leaf] = 0
-                    if altered_ProbMatrix != np.zeros(altered_ProbMatrix.shape):
-                        altered_ProbMatrix = sklearn.preprocessing.normalize(altered_ProbMatrix, axis=1)
+                    altered_ProbMatrix[:, leaf] = 0 # set leaf's column to 0: leaf should be nobody's parent, unless there's a restart, to avoid cycles
+                    if (altered_ProbMatrix != np.zeros(altered_ProbMatrix.shape)).any():
+                        altered_ProbMatrix = altered_ProbMatrix/altered_ProbMatrix.sum(axis=1, keepdims=True)
+                        print(altered_ProbMatrix.sum(axis=1))
                     else:
                         break
             if sum(np.isin(pi, np.inf)) > 0:
+                breakpoint()
                 raise ValueError("Leaf with no parent")
             trees.append(pi)
             breakpoint()
