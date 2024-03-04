@@ -20,6 +20,7 @@ import os
 import shutil
 from typing import Any, Dict, List
 
+import scipy.special
 import torch
 from absl import app
 from absl import flags
@@ -29,6 +30,7 @@ import jax
 import numpy as np
 import requests
 import tensorflow as tf
+import sklearn
 
 #NEW
 import pandas as pd # saving results to dataframe for easy visualization
@@ -340,6 +342,17 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
   true_argmax_truthmask = [check_graphs.is_acyclic(As[i], true_sample_argmax[i].tolist()) for i in range(len(true_sample_argmax))]
   correctness_true_argmax = sum(true_argmax_truthmask) / len(true_argmax_truthmask)
 
+  model_sample_upwards = sample_upwards(preds)
+  true_sample_upwards = sample_upwards(outputs)
+
+  model_upwards_truthmask = [check_graphs.is_acyclic(As[i], model_sample_upwards[i]) for i in
+                            range(len(model_sample_upwards))]
+  correctness_model_upwards = sum(model_upwards_truthmask) / len(model_upwards_truthmask)
+
+  true_upwards_truthmask = [check_graphs.is_acyclic(As[i], true_sample_upwards[i]) for i in
+                           range(len(true_sample_upwards))]
+  correctness_true_upwards = sum(true_upwards_truthmask) / len(true_upwards_truthmask)
+
   breakpoint()
   As = [i.flatten() for i in As]
   result_dict = {"As": As,
@@ -361,6 +374,15 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
                  #
                  "Random_Model_Accuracy": correctness_model_random,
                  "Random_True_Accuracy": correctness_true_random,
+
+                 "Upwards_Model_Trees": model_sample_upwards,
+                 "Upwards_True_Trees": true_sample_upwards,
+                 #
+                 "Upwards_Model_Mask": model_upwards_truthmask,
+                 "Upwards_True_Mask": true_upwards_truthmask,
+                 #
+                 "Upwards_Model_Accuracy": correctness_model_upwards,
+                 "Upwards_True_Accuracy": correctness_true_upwards,
                  }
   result_df = pd.DataFrame.from_dict(result_dict)
   result_df.to_csv('accuracy.csv', encoding='utf-8', index=False)
@@ -368,15 +390,6 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
   #As[0].reshape((np.sqrt(len(lAs[0])).astype(int)), np.sqrt(len(lAs[0])).astype(int))
 
 
-  #TODO implement me
-  #sample_upwards = sample_upwards(preds)
-  #true_sample_upwards = sample_upwards(outputs)
-  ###
-    # sample argmax
-    # sample upwards
-    # sample true distribution. Distinguish error of sampling method from error from NNs.
-
-  ###
   preds = _concat(preds, axis=0)
   out = clrs.evaluate(outputs, preds)
 
@@ -433,6 +446,8 @@ def leafinessSort(probMatrix):
     sums = np.sum(probMatrix, axis=0)
     # sort by sum column, remember the original column number
     # FIXME implement
+    leafiness = np.argsort(sums)
+    return leafiness
 
 def sample_upwards(outsOrPreds):
     trees = []
@@ -445,10 +460,39 @@ def sample_upwards(outsOrPreds):
         for probMatrix in distlist:
             ### COMPUTATION HERE
             #. sort by leafiness
+            leafiness = leafinessSort(probMatrix)
+
+            # turn probmatrix into true probability dist (summing to 1)
+            altered_ProbMatrix= sklearn.preprocessing.normalize(probMatrix, axis = 1)
             #. grab most leafy, find its parent, continue till already-discovered (self-parent or prev. iter).
-            pi = []
-            for row in probMatrix:
-                pi.append(rng.integers(len(row)))
+            pi = np.full(len(probMatrix), np.inf)
+            while len(leafiness) > 0:
+                altered_ProbMatrix = sklearn.preprocessing.normalize(probMatrix, axis=1)
+                leaf = leafiness[0]
+                # sample the leafs parent
+                parent = np.random.choice([i for i in range(len(probMatrix))], p=altered_ProbMatrix[leaf])
+                pi[leaf] = parent
+                leafiness = np.delete(leafiness, obj = [0,parent])
+                altered_ProbMatrix[:,leaf] = 0
+                if altered_ProbMatrix != np.zeros(altered_ProbMatrix.shape):
+                    altered_ProbMatrix = sklearn.preprocessing.normalize(altered_ProbMatrix, axis=1)
+                else:
+                    break
+                # sample up the tree until parent is the start node, a self-loop or already has a parent
+                while not pi[parent] != np.inf:
+                    # sample up the tree
+                    leaf = parent
+                    parent = np.random.choice([i for i in range(len(probMatrix))], p = altered_ProbMatrix[leaf])
+                    pi[leaf] = parent
+                    # remove parent as potential
+                    leafiness = np.delete(leafiness, obj = [0,parent])
+                    altered_ProbMatrix[:, leaf] = 0
+                    if altered_ProbMatrix != np.zeros(altered_ProbMatrix.shape):
+                        altered_ProbMatrix = sklearn.preprocessing.normalize(altered_ProbMatrix, axis=1)
+                    else:
+                        break
+            if sum(np.isin(pi, np.inf)) > 0:
+                raise ValueError("Leaf with no parent")
             trees.append(pi)
             breakpoint()
     return trees
