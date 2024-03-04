@@ -483,20 +483,21 @@ def sample_upwards(outsOrPreds):
             #. grab most leafy, find its parent, continue till already-discovered (self-parent or prev. iter).
             pi = np.full(len(probMatrix), np.inf)
             #breakpoint()
-            while len(leafiness) > 0:
+            while sum(leafiness) > -len(leafiness):
                 print('leafiness, ', leafiness)
-                altered_ProbMatrix = probMatrix/probMatrix.sum(axis=1, keepdims=True)
-                print(altered_ProbMatrix.sum(axis=1))
-                leaf = leafiness[0]
+                print("pi", pi)
+                altered_ProbMatrix = probMatrix.astype(np.float64)/probMatrix.sum(axis=1, keepdims=True)
+                leaf = leafiness[leafiness != -1][0]
                 # sample the leafs parent
                 parent = np.argmax(np.random.multinomial(n=1, pvals=altered_ProbMatrix[leaf]))
-                breakpoint()
+                #breakpoint()
                 pi[leaf] = parent # FIXME sometimes index error
-                leafiness = np.delete(leafiness, obj = [0,parent])
+                leafiness[leaf] = -1
+                leafiness[parent] = -1
                 altered_ProbMatrix[:,leaf] = 0 # set leaf's column to 0: leaf should be nobody's parent, unless there's a restart, to avoid cycles
-                breakpoint()
+                #breakpoint()
                 if (altered_ProbMatrix != np.zeros(altered_ProbMatrix.shape)).any(): # make sure not all 0s
-                    altered_ProbMatrix = altered_ProbMatrix/altered_ProbMatrix.sum(axis=1, keepdims=True)
+                    altered_ProbMatrix = altered_ProbMatrix.astype(np.float64)/altered_ProbMatrix.sum(axis=1, keepdims=True)
                     print(altered_ProbMatrix.sum(axis=1))
                 else:
                     break
@@ -504,23 +505,27 @@ def sample_upwards(outsOrPreds):
                 while pi[parent] == np.inf:
                     # sample up the tree
                     print('run.py \n', altered_ProbMatrix)
-                    breakpoint()
+                    #breakpoint()
                     leaf = parent
                     parent = np.argmax(np.random.multinomial(n=1, pvals=altered_ProbMatrix[leaf]))
                     pi[leaf] = parent
                     # remove parent as potential
-                    leafiness = np.delete(leafiness, obj = [0,parent])
+                    leafiness[leaf] = -1
+                    leafiness[parent] = -1
                     altered_ProbMatrix[:, leaf] = 0 # set leaf's column to 0: leaf should be nobody's parent, unless there's a restart, to avoid cycles
-                    if (altered_ProbMatrix != np.zeros(altered_ProbMatrix.shape)).any():
+                    if altered_ProbMatrix.sum() != 0:
+                        print(altered_ProbMatrix)
                         altered_ProbMatrix = altered_ProbMatrix/altered_ProbMatrix.sum(axis=1, keepdims=True)
-                        print(altered_ProbMatrix.sum(axis=1))
+                        print(f"Altered probmatrix sum {altered_ProbMatrix.sum(axis=1)}")
                     else:
+                        leafiness = [-1]
                         break
             if sum(np.isin(pi, np.inf)) > 0:
-                breakpoint()
+                #breakpoint()
                 raise ValueError("Leaf with no parent")
             trees.append(pi)
-            breakpoint()
+            #breakpoint()
+        print("done w a prob matrix!")
     return trees
 
 def create_samplers(rng, train_lengths: List[int]):
