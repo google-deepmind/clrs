@@ -488,6 +488,8 @@ def sample_upwards(outsOrPreds):
                 print("pi", pi)
                 altered_ProbMatrix = probMatrix.astype(np.float64)/probMatrix.sum(axis=1, keepdims=True)
                 leaf = leafiness[leafiness != -1][0]
+                print(leafiness[leafiness != -1])
+                print("leaf", leaf)
                 # sample the leafs parent
                 parent = np.argmax(np.random.multinomial(n=1, pvals=altered_ProbMatrix[leaf]))
                 #breakpoint()
@@ -496,9 +498,9 @@ def sample_upwards(outsOrPreds):
                 leafiness[parent] = -1
                 altered_ProbMatrix[:,leaf] = 0 # set leaf's column to 0: leaf should be nobody's parent, unless there's a restart, to avoid cycles
                 #breakpoint()
-                if (altered_ProbMatrix != np.zeros(altered_ProbMatrix.shape)).any(): # make sure not all 0s
+                if altered_ProbMatrix.sum() != 0: # make sure not all 0s
                     altered_ProbMatrix = altered_ProbMatrix.astype(np.float64)/altered_ProbMatrix.sum(axis=1, keepdims=True)
-                    print(altered_ProbMatrix.sum(axis=1))
+                    print(altered_ProbMatrix)
                 else:
                     break
                 # sample up the tree until parent is the start node, a self-loop or already has a parent
