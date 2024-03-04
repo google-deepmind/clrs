@@ -340,12 +340,25 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
   true_argmax_truthmask = [check_graphs.is_acyclic(As[i], true_sample_argmax[i].tolist()) for i in range(len(true_sample_argmax))]
   correctness_true_argmax = sum(true_argmax_truthmask) / len(true_argmax_truthmask)
 
-  #breakpoint()
+  breakpoint()
   As = [i.flatten() for i in As]
-  result_dict = {"As":As, "Model_Mask" : model_argmax_truthmask,
-                 "True_Mask" : true_argmax_truthmask,
+  result_dict = {"As": As,
+                 #
+                 "Argmax_Model_Trees": model_sample_argmax,
+                 "Argmax_True_Trees": true_sample_argmax,
+                 #
+                 "Argmax_Model_Mask": model_argmax_truthmask,
+                 "Argmax_True_Mask": true_argmax_truthmask,
+                 #
                  "Argmax_Model_Accuracy": correctness_model_argmax,
-                 "Argmax_True_Accuracy":correctness_true_argmax,
+                 "Argmax_True_Accuracy": correctness_true_argmax,
+                 #
+                 "Random_Model_Trees": model_sample_random,
+                 "Random_True_Trees": true_sample_random,
+                 #
+                 "Random_Model_Mask": model_random_truthmask,
+                 "Random_True_Mask": true_random_truthmask,
+                 #
                  "Random_Model_Accuracy": correctness_model_random,
                  "Random_True_Accuracy": correctness_true_random,
                  }
