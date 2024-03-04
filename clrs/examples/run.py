@@ -423,6 +423,35 @@ def sample_random_list(outsOrPreds):
             #breakpoint()
     return trees
 
+def leafinessSort(probMatrix):
+    '''
+    Args:
+        probMatrix: Expects probMatrix[i][j] to indicate the probability that node j is the parent of node i
+
+    Returns: sorted-list of vertex indices where first node had lowest probability of being parent. (column with lowest sum).
+    '''
+    sums = np.sum(probMatrix, axis=0)
+    # sort by sum column, remember the original column number
+    # FIXME implement
+
+def sample_upwards(outsOrPreds):
+    trees = []
+    # PREPROCESS TO EXTRACT probMatrix
+    for i in outsOrPreds:
+        if type(i) == type({}):
+            distlist = i["pi"].data
+        else:
+            distlist = i.data
+        for probMatrix in distlist:
+            ### COMPUTATION HERE
+            #. sort by leafiness
+            #. grab most leafy, find its parent, continue till already-discovered (self-parent or prev. iter).
+            pi = []
+            for row in probMatrix:
+                pi.append(rng.integers(len(row)))
+            trees.append(pi)
+            breakpoint()
+    return trees
 
 def create_samplers(rng, train_lengths: List[int]):
   """Create all the samplers."""
