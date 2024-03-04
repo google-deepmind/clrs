@@ -73,7 +73,7 @@ flags.DEFINE_float('hint_teacher_forcing', 0.0,
                    'during training instead of predicted hints. Only '
                    'pertinent in encoded_decoded modes.')
 flags.DEFINE_enum('hint_mode', 'encoded_decoded',
-                  ['encoded_decoded', 'decoded_only', 'none'],
+                  ['encoded_decoded', 'decoded_only', 'none_encoded_decoded', 'none'],
                   'How should hints be used? Note, each mode defines a '
                   'separate task, with various difficulties. `encoded_decoded` '
                   'requires the model to explicitly materialise hint sequences '
@@ -85,7 +85,9 @@ flags.DEFINE_enum('hint_mode', 'encoded_decoded',
                   'note that we currently do not make any efforts to '
                   'counterbalance the various hint losses. Hence, for certain '
                   'tasks, the best performance will now be achievable with no '
-                  'hint usage at all (`none`).')
+                  'hint usage at all (`none`). `none_encoded_decoded` produces'
+                  'similar computation graphs to `encoded_decoded` but without'
+                  'hint usage.')
 flags.DEFINE_enum('hint_repred_mode', 'soft', ['soft', 'hard', 'hard_on_eval'],
                   'How to process predicted hints when fed back as inputs.'
                   'In soft mode, we use softmaxes for categoricals, pointers '
@@ -365,14 +367,21 @@ def main(unused_argv):
   if FLAGS.hint_mode == 'encoded_decoded':
     encode_hints = True
     decode_hints = True
+    compute_hint_loss = True
   elif FLAGS.hint_mode == 'decoded_only':
     encode_hints = False
     decode_hints = True
+    compute_hint_loss = True
+  elif FLAGS.hint_mode == 'none_encoded_decoded':
+    encode_hints = True
+    decode_hints = True
+    compute_hint_loss = False
   elif FLAGS.hint_mode == 'none':
     encode_hints = False
     decode_hints = False
+    compute_hint_loss = False
   else:
-    raise ValueError('Hint mode not in {encoded_decoded, decoded_only, none}.')
+    raise ValueError('Hint mode not in {encoded_decoded, decoded_only, none_encoded_decoded, none}.')
 
   train_lengths = [int(x) for x in FLAGS.train_lengths]
 
@@ -396,6 +405,7 @@ def main(unused_argv):
       hidden_dim=FLAGS.hidden_size,
       encode_hints=encode_hints,
       decode_hints=decode_hints,
+      compute_hint_loss=compute_hint_loss,
       encoder_init=FLAGS.encoder_init,
       use_lstm=FLAGS.use_lstm,
       learning_rate=FLAGS.learning_rate,

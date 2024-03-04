@@ -144,6 +144,7 @@ class BaselineModel(model.Model):
       hidden_dim: int = 32,
       encode_hints: bool = False,
       decode_hints: bool = True,
+      compute_hint_loss: bool = True,
       encoder_init: str = 'default',
       use_lstm: bool = False,
       learning_rate: float = 0.005,
@@ -175,6 +176,7 @@ class BaselineModel(model.Model):
         message-passing vectors.
       encode_hints: Whether to provide hints as model inputs.
       decode_hints: Whether to provide hints as model outputs.
+      compute_hint_loss: Whether to add hint loss to the output loss.
       encoder_init: The initialiser type to use for the encoders.
       use_lstm: Whether to insert an LSTM after message passing.
       learning_rate: Learning rate for training.
@@ -202,15 +204,19 @@ class BaselineModel(model.Model):
 
     Raises:
       ValueError: if `encode_hints=True` and `decode_hints=False`.
+                  if `compute_hint_loss=True` and `decode_hints=False`.
     """
     super(BaselineModel, self).__init__(spec=spec)
 
     if encode_hints and not decode_hints:
       raise ValueError('`encode_hints=True`, `decode_hints=False` is invalid.')
+    if compute_hint_loss and not decode_hints:
+      raise ValueError('`compute_hint_loss=True`, `decode_hints=False` is invalid.')
 
     assert hint_repred_mode in ['soft', 'hard', 'hard_on_eval']
 
     self.decode_hints = decode_hints
+    self.compute_hint_loss = compute_hint_loss
     self.checkpoint_path = checkpoint_path
     self.name = name
     self._freeze_processor = freeze_processor
@@ -414,7 +420,7 @@ class BaselineModel(model.Model):
       )
 
     # Optionally accumulate hint losses.
-    if self.decode_hints:
+    if self.compute_hint_loss:
       for truth in feedback.features.hints:
         total_loss += losses.hint_loss(
             truth=truth,
@@ -455,7 +461,7 @@ class BaselineModel(model.Model):
     losses_ = {}
 
     # Optionally accumulate hint losses.
-    if self.decode_hints:
+    if self.compute_hint_loss:
       for truth in feedback.features.hints:
         losses_.update(
             losses.hint_loss(
@@ -591,7 +597,7 @@ class BaselineModelChunked(BaselineModel):
       )
 
     # Optionally accumulate hint losses.
-    if self.decode_hints:
+    if self.compute_hint_loss:
       for truth in feedback.features.hints:
         loss = losses.hint_loss_chunked(
             truth=truth,
