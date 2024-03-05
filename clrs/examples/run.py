@@ -499,12 +499,12 @@ def sample_upwards(outsOrPreds):
             pi = np.full(len(probMatrix), np.inf)
             #breakpoint()
             while sum(leafiness) > -len(leafiness):
-                print('leafiness, ', leafiness)
-                print("pi", pi)
+               #print('leafiness, ', leafiness)
+                #print("pi", pi)
                 altered_ProbMatrix = rowWiseProb(probMatrix)
                 leaf = leafiness[leafiness != -1][0]
-                print(leafiness[leafiness != -1])
-                print("leaf", leaf)
+                #print(leafiness[leafiness != -1])
+                #rint("leaf", leaf)
                 # sample the leafs parent
                 parent = chooseUniformly(altered_ProbMatrix[leaf])
                 #if parent == None:
@@ -517,16 +517,16 @@ def sample_upwards(outsOrPreds):
 
                 # sample up the tree until parent is the start node, a self-loop or already has a parent
                 #breakpoint()
-                print('before \n', parent)
+                #print('before \n', parent)
                 #if parent == None:
                 #    breakpoint()
                 while pi[parent] == np.inf:
-                    print('after \n', parent)
-                    print(pi)
-                    print(np.inf)
+                    #print('after \n', parent)
+                    #print(pi)
+                    #print(np.inf)
                     # sample up the tree
 
-                    print('run.py \n', altered_ProbMatrix)
+                    #print('run.py \n', altered_ProbMatrix)
                     #breakpoint()
                     leaf = parent
                     parent = chooseUniformly(altered_ProbMatrix[leaf])
@@ -538,9 +538,9 @@ def sample_upwards(outsOrPreds):
 
             if sum(np.isin(pi, np.inf)) > 0:
                 #breakpoint()
-                print(leafiness)
-                print(pi)
-                print(altered_ProbMatrix)
+                #print(leafiness)
+                #print(pi)
+                #print(altered_ProbMatrix)
                 raise ValueError("Leaf with no parent")
             trees.append(pi)
             #breakpoint()
