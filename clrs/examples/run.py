@@ -318,21 +318,20 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
     # 3. Collect validity result into a dataframe.
 
 
-  model_sample_argmax = sample_argmax_listofdict(preds)
-  true_sample_argmax = sample_argmax_listofdatapoint(outputs)
-
+##### RANDOM
   model_sample_random = sample_random_list(preds)
   true_sample_random = sample_random_list(outputs)
 
-  model_random_truthmask = [check_graphs.is_acyclic(As[i], model_sample_random[i]) for i in
-                            range(len(model_sample_random))]
+  model_random_truthmask = [check_graphs.is_acyclic(As[i], model_sample_random[i]) for i in range(len(model_sample_random))]
   correctness_model_random = sum(model_random_truthmask) / len(model_random_truthmask)
 
-  true_random_truthmask = [check_graphs.is_acyclic(As[i], true_sample_random[i]) for i in
-                           range(len(true_sample_random))]
+  true_random_truthmask = [check_graphs.is_acyclic(As[i], true_sample_random[i]) for i in range(len(true_sample_random))]
   correctness_true_random = sum(true_random_truthmask) / len(true_random_truthmask)
 
+##### ARGMAX
   ## remember to convert from jax arrays to lists for easy subsequent methods using .tolist()
+  model_sample_argmax = sample_argmax_listofdict(preds)
+  true_sample_argmax = sample_argmax_listofdatapoint(outputs)
 
   # compute the fraction of trees sampled from model output fulfilling the necessary conditions
   model_argmax_truthmask = [check_graphs.is_acyclic(As[i],model_sample_argmax[i].tolist()) for i in range(len(model_sample_argmax))]
@@ -342,16 +341,27 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
   true_argmax_truthmask = [check_graphs.is_acyclic(As[i], true_sample_argmax[i].tolist()) for i in range(len(true_sample_argmax))]
   correctness_true_argmax = sum(true_argmax_truthmask) / len(true_argmax_truthmask)
 
+  ##### UPWARDS
   model_sample_upwards = sample_upwards(preds)
   true_sample_upwards = sample_upwards(outputs)
 
-  model_upwards_truthmask = [check_graphs.is_acyclic(As[i], model_sample_upwards[i]) for i in
-                            range(len(model_sample_upwards))]
+  model_upwards_truthmask = [check_graphs.is_acyclic(As[i], model_sample_upwards[i]) for i in range(len(model_sample_upwards))]
   correctness_model_upwards = sum(model_upwards_truthmask) / len(model_upwards_truthmask)
 
-  true_upwards_truthmask = [check_graphs.is_acyclic(As[i], true_sample_upwards[i]) for i in
-                           range(len(true_sample_upwards))]
+  true_upwards_truthmask = [check_graphs.is_acyclic(As[i], true_sample_upwards[i]) for i in range(len(true_sample_upwards))]
   correctness_true_upwards = sum(true_upwards_truthmask) / len(true_upwards_truthmask)
+
+  ##### ALTUPWARDS
+  model_sample_altUpwards = sample_altUpwards(preds)
+  true_sample_altUpwards = sample_altUpwards(outputs)
+
+  model_altUpwards_truthmask = [check_graphs.is_acyclic(As[i], model_sample_altUpwards[i]) for i in
+                             range(len(model_sample_altUpwards))]
+  correctness_model_altUpwards = sum(model_altUpwards_truthmask) / len(model_altUpwards_truthmask)
+
+  true_altUpwards_truthmask = [check_graphs.is_acyclic(As[i], true_sample_altUpwards[i]) for i in
+                            range(len(true_sample_altUpwards))]
+  correctness_true_altUpwards = sum(true_altUpwards_truthmask) / len(true_altUpwards_truthmask)
 
   #breakpoint()
   As = [i.flatten() for i in As]
@@ -366,6 +376,8 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
                  "Argmax_Model_Accuracy": correctness_model_argmax,
                  "Argmax_True_Accuracy": correctness_true_argmax,
                  #
+                 ###
+                 #
                  "Random_Model_Trees": model_sample_random,
                  "Random_True_Trees": true_sample_random,
                  #
@@ -374,7 +386,9 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
                  #
                  "Random_Model_Accuracy": correctness_model_random,
                  "Random_True_Accuracy": correctness_true_random,
-
+                 #
+                 ###
+                 #
                  "Upwards_Model_Trees": model_sample_upwards,
                  "Upwards_True_Trees": true_sample_upwards,
                  #
@@ -383,6 +397,17 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
                  #
                  "Upwards_Model_Accuracy": correctness_model_upwards,
                  "Upwards_True_Accuracy": correctness_true_upwards,
+                 #
+                 ###
+                 #
+                 "altUpwards_Model_Trees": model_sample_altUpwards,
+                 "altUpwards_True_Trees": true_sample_altUpwards,
+                 #
+                 "altUpwards_Model_Mask": model_altUpwards_truthmask,
+                 "altUpwards_True_Mask": true_altUpwards_truthmask,
+                 #
+                 "altUpwards_Model_Accuracy": correctness_model_altUpwards,
+                 "altUpwards_True_Accuracy": correctness_true_altUpwards,
                  }
   result_df = pd.DataFrame.from_dict(result_dict)
   result_df.to_csv('accuracy.csv', encoding='utf-8', index=False)
@@ -546,6 +571,52 @@ def sample_upwards(outsOrPreds):
             #breakpoint()
         #print("done w a prob matrix!")
     return trees
+
+def extract_probMatrices(outsOrPreds):
+    ''''
+    handles ugly formatting difference: outs a list of dicts of datapoints,
+    preds a list of datapoints
+    '''
+    big_probmatrix_list = []
+    for i in outsOrPreds:
+        if type(i) == type({}):
+            distlist = i["pi"].data
+        else:
+            distlist = i.data
+        big_probmatrix_list.extend(distlist)
+    return big_probmatrix_list
+
+def explore_upwards(orphan_ix, parent_guesses, probMatrix):
+    '''starting at node_ix, sample parents upwards until you find a node which already has a parent'''
+    while parent_guesses[orphan_ix] == np.inf: # until you find node who already has parent,
+        # sample parent according to row of notExactlyProbs
+        parent_guess = chooseUniformly(probMatrix[orphan_ix])
+        parent_guesses[orphan_ix] = parent_guess
+        # try further up the tree
+        orphan_ix = parent_guess
+    return parent_guesses
+
+
+def get_parent_tree_upwards(probMatrix):
+    '''according to leafiness, explore upwards, until all nodes have parents (could be themselves)'''
+    parent_guesses = np.full(len(probMatrix), np.inf)
+    leafiness = leafinessSort(probMatrix)  # most leafy is least-likely to be a parent: lowest column sum of probMatrix
+    for node_ix in leafiness:
+        if parent_guesses[node_ix] == np.inf:
+            parent_guesses = explore_upwards(node_ix, parent_guesses, probMatrix)
+    if np.inf in parent_guesses:
+        raise ValueError('not guessing parent for someone')
+    return parent_guesses
+
+
+def sample_altUpwards(outsOrPreds):
+    # search up
+    probMatrix_list = extract_probMatrices(outsOrPreds)
+    pi_trees = []
+    for probMatrix in probMatrix_list:
+        # build a pi-tree, sampling up
+        pi_trees.append(get_parent_tree_upwards(probMatrix))
+    return pi_trees
 
 def create_samplers(rng, train_lengths: List[int]):
   """Create all the samplers."""

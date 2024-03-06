@@ -55,11 +55,7 @@ def is_acyclic(np_input_array, pi):
                 pi[i] = -1
     else:
         return False
-
     #print('postpi, ',pi)
-
-
-
 
     #breakpoint()
     ts = gl.TopologicalSorter()
