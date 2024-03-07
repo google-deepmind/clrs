@@ -1182,7 +1182,6 @@ def bellman_ford(A: _Array, s: int) -> _Out:
   """Bellman-Ford's single-source shortest path (Bellman, 1958)."""
 
   chex.assert_rank(A, 2)
-  probes = probing.initialize(specs.SPECS['bellman_ford'])
 
   A_pos = np.arange(A.shape[0])
 
@@ -1192,6 +1191,8 @@ def bellman_ford(A: _Array, s: int) -> _Out:
   NUM_SOLUTIONS = 20
 
   for i in range(NUM_SOLUTIONS):
+      probes = probing.initialize(specs.SPECS['bellman_ford'])
+
       probing.push(
           probes,
           specs.Stage.INPUT,
@@ -1236,13 +1237,15 @@ def bellman_ford(A: _Array, s: int) -> _Out:
         if np.all(d == prev_d):
           break
 
+      probing.push(probes, specs.Stage.OUTPUT, next_probe={'pi': np.copy(pi)})
+      probing.finalize(probes)
+
       pies.append(pi)
       probeslist.append(probes)
 
     # CHeck indent
 
-  #probing.push(probes, specs.Stage.OUTPUT, next_probe={'pi': np.copy(pi)})
-  #probing.finalize(probes)
+
 
   ### DFS CODE
   # build adj matrix of "is i a parent of j in any pi", sums and divides.
@@ -1259,7 +1262,7 @@ def bellman_ford(A: _Array, s: int) -> _Out:
   # print(parent_dist)
   probeslist[0]['output']['node']['pi']['data'] = parent_dist
 
-  breakpoint() ## weird formatting error
+  #breakpoint() ## weird formatting error
   ## CHECK THE PUSHING!
   return parent_dist, probeslist[0]
 

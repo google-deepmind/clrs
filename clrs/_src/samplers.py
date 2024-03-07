@@ -883,7 +883,6 @@ def process_random_pos(sample_iterator, rng):
       feedback = next(sample_iterator)
       inputs = feedback.features.inputs
       pos, = [x for x in inputs if x.name == 'pos']
-      breakpoint()
       batch_size, num_nodes = pos.data.shape
       unsorted = rng.uniform(size=(batch_size, num_nodes))
       new_pos = []
