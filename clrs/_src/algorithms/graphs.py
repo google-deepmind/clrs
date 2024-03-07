@@ -1186,54 +1186,82 @@ def bellman_ford(A: _Array, s: int) -> _Out:
 
   A_pos = np.arange(A.shape[0])
 
-  probing.push(
-      probes,
-      specs.Stage.INPUT,
-      next_probe={
-          'pos': np.copy(A_pos) * 1.0 / A.shape[0],
-          's': probing.mask_one(s, A.shape[0]),
-          'A': np.copy(A),
-          'adj': probing.graph(np.copy(A))
-      })
+  # run many, make distribution
+  probeslist = []
+  pies = []
+  NUM_SOLUTIONS = 20
 
-  d = np.zeros(A.shape[0])
-  pi = np.arange(A.shape[0])
-  msk = np.zeros(A.shape[0])
-  d[s] = 0
-  msk[s] = 1
+  for i in range(NUM_SOLUTIONS):
+      probing.push(
+          probes,
+          specs.Stage.INPUT,
+          next_probe={
+              'pos': np.copy(A_pos) * 1.0 / A.shape[0],
+              's': probing.mask_one(s, A.shape[0]),
+              'A': np.copy(A),
+              'adj': probing.graph(np.copy(A))
+          })
 
-  shuffled1 = np.arange(1, A.shape[0])
-  np.random.shuffle(shuffled1)
-  shuffled1 = np.concatenate(([0],shuffled1))
+      d = np.zeros(A.shape[0])
+      pi = np.arange(A.shape[0])
+      msk = np.zeros(A.shape[0])
+      d[s] = 0
+      msk[s] = 1
 
-  # shuffled for inner loop
-  shuffled2 = np.arange(A.shape[0])
-  np.random.shuffle(shuffled2)
-  while True:
-    prev_d = np.copy(d)
-    prev_msk = np.copy(msk)
-    probing.push(
-        probes,
-        specs.Stage.HINT,
-        next_probe={
-            'pi_h': np.copy(pi),
-            'd': np.copy(prev_d),
-            'msk': np.copy(prev_msk)
-        })
-    for u in shuffled1:
-      for v in shuffled2:
-        if prev_msk[u] == 1 and A[u, v] != 0:
-          if msk[v] == 0 or prev_d[u] + A[u, v] < d[v]:
-            d[v] = prev_d[u] + A[u, v]
-            pi[v] = u
-          msk[v] = 1
-    if np.all(d == prev_d):
-      break
+      shuffled1 = np.arange(1, A.shape[0])
+      np.random.shuffle(shuffled1)
+      shuffled1 = np.concatenate(([0],shuffled1))
 
-  probing.push(probes, specs.Stage.OUTPUT, next_probe={'pi': np.copy(pi)})
-  probing.finalize(probes)
+      # shuffled for inner loop
+      shuffled2 = np.arange(A.shape[0])
+      np.random.shuffle(shuffled2)
+      while True:
+        prev_d = np.copy(d)
+        prev_msk = np.copy(msk)
+        probing.push(
+            probes,
+            specs.Stage.HINT,
+            next_probe={
+                'pi_h': np.copy(pi),
+                'd': np.copy(prev_d),
+                'msk': np.copy(prev_msk)
+            })
+        for u in shuffled1:
+          for v in shuffled2:
+            if prev_msk[u] == 1 and A[u, v] != 0:
+              if msk[v] == 0 or prev_d[u] + A[u, v] < d[v]:
+                d[v] = prev_d[u] + A[u, v]
+                pi[v] = u
+              msk[v] = 1
+        if np.all(d == prev_d):
+          break
 
-  return pi, probes
+      pies.append(pi)
+      probeslist.append(probes)
+
+    # CHeck indent
+
+  #probing.push(probes, specs.Stage.OUTPUT, next_probe={'pi': np.copy(pi)})
+  #probing.finalize(probes)
+
+  ### DFS CODE
+  # build adj matrix of "is i a parent of j in any pi", sums and divides.
+  adjs = []
+  for i in range(NUM_SOLUTIONS):
+      adj = np.zeros(A.shape)
+      for j in range(len(pies[0])):  # what's the parent of j?
+          #breakpoint()
+          adj[j, pies[i][j]] = 1  # at row j, put 1 in the column corresponding to parent
+      adjs.append(adj)
+  parent_dist = sum(adjs) / NUM_SOLUTIONS
+  # parent_dist = sp.special.logit(parent_dist)
+  # print(probes)
+  # print(parent_dist)
+  probeslist[0]['output']['node']['pi']['data'] = parent_dist
+
+  breakpoint() ## weird formatting error
+  ## CHECK THE PUSHING!
+  return parent_dist, probeslist[0]
 
 def dijkstra(A: _Array, s: int) -> _Out:
   """Dijkstra's single-source shortest path (Dijkstra, 1959)."""

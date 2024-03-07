@@ -149,6 +149,7 @@ def evaluate(
 
 def _evaluate(truth, pred, idx=None, lengths=None):
   """Evaluate single prediction of hint or output."""
+  breakpoint()
   assert pred.name == truth.name
   assert pred.location == truth.location
   assert pred.type_ == truth.type_

@@ -213,7 +213,7 @@ class Sampler(abc.ABC):
   def _int_weighted_random_er_graph(self, nb_nodes, p=0.5, directed=False, acyclic=False,
                        weighted=False, low=0.0, high=1.0):
     """Random Erdos-Renyi graph."""
-    print('samplers, int_weighted')
+    #print('samplers, int_weighted')
     mat = self._rng.binomial(1, p, size=(nb_nodes, nb_nodes))
     if not directed:
       mat *= np.transpose(mat)
@@ -883,6 +883,7 @@ def process_random_pos(sample_iterator, rng):
       feedback = next(sample_iterator)
       inputs = feedback.features.inputs
       pos, = [x for x in inputs if x.name == 'pos']
+      breakpoint()
       batch_size, num_nodes = pos.data.shape
       unsorted = rng.uniform(size=(batch_size, num_nodes))
       new_pos = []
