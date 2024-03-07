@@ -25,39 +25,80 @@ disconnect_adj = np.array([
 ])
 disconnect_pi = [0,0,2]
 
-def is_acyclic(np_input_array, pi):
+edge_to_zero_adj = np.array([
+    [0,0],
+    [1,0]
+])
+edge_to_zero_pi = [0,1]
+## BREAKS!!!
+
+def replace_self_loops_with_minus1(pi):
+    for i in range(len(pi)):
+        if pi[i] == i:
+            pi[i] = -1
+    return pi
+
+def are_valid_edges_parents(np_input_array, pi):
+    for i in range(len(pi)): # for node in graph.
+        parent = pi[i]
+        if parent != i: # Not a restart, check edge parent->child. (assume restarts are always valid, check later).
+            if np_input_array[parent][i] == 0: # no edge parent -> child
+                return False
+    return True
+def check_valid_dfsTree(np_input_array, pi):
+    '''checks: acyclic, dangling, edge-validity, and valid-start'''
+    pi = pi[:] # copy pi. make sure don't mess with logging
+    if pi[0] == 0: # correct start-node
+        if are_valid_edges_parents(np_input_array, pi):
+            if are_valid_order_parents(np_input_array, pi): # self-loops not reachable by lower_ix. Other parents reachable by ...
+                pi = replace_self_loops_with_minus1(pi)
+                if is_acyclic(pi): # no funky hiding parents. Should be implied by lower-node reachability.
+                    return True
+                else:
+                    print('cycle')
+            else:
+                print('oo')
+        else:
+            print('not edges')
+    else:
+        print('wrong startnode')
+    return False
+
+def are_valid_order_parents(np_input_array, pi):
+    """
+    Checks whether self-loops stem from valid DFS execution.
+        If you were reachable_by_earlier_node, but have self-loop, it's a problem
+    :param input:
+    :param pi:
+    :return:
+    """
+    g = nx.from_numpy_array(np_input_array, create_using=nx.DiGraph)
+    for i in range(len(pi)):
+        if pi[i] == i:
+            for j in range(i): # crucially, this does not run when i=0, so the starting 0,0 self-loop always permitted
+                self_reachable_by_earlier_node = nx.has_path(g, j, i) # does this do it directed? lower-triangle?
+                #breakpoint()
+                if self_reachable_by_earlier_node:
+                    return False
+        else: # not self-loop, so not a restart, make sure parents are reachable by lower_ix node
+            flag = False
+            for j in range(i):
+                parent_reachable_by_earlier_node = nx.has_path(g, j, pi[i])
+                if parent_reachable_by_earlier_node:
+                    flag = True
+            if not flag: # parent wasn't reachable by lower_ix node
+                return False
+    return True
+
+
+
+def is_acyclic(pi):
     """
     Function to check for cycles in a predecessor array returned by the model
     :param input: the adjacency matrix of the graph on which the model has inferred the predecessor array
     :param pi: the predecessor array
     :return: Boolean indicating acyclicity
     """
-
-    # if self-loop: is i reachable from a lower-indexed node?
-        # if yes: return false
-        # if no: replace its parent by the god node -1
-
-    # Build networkx graph
-    graph = nx.DiGraph()
-    graph.add_nodes_from(range(len(pi)))
-    for i in range(len(pi)):
-        for j in range(len(pi)):
-            if np_input_array[i][j] == 1:
-                graph.add_edge(i,j)
-    # no self-loop on the start node
-    #pi[0] = -1
-
-    #print('prepi, ',pi)
-    # check self-looping conditions
-    if is_valid_self_loops(np_input_array, pi):
-        for i in range(len(pi)):
-            if pi[i] == i:
-                pi[i] = -1
-    else:
-        return False
-    #print('postpi, ',pi)
-
-    #breakpoint()
     ts = gl.TopologicalSorter()
     for i in range(len(pi)):
         ts.add(i, pi[i])
@@ -71,22 +112,6 @@ def is_acyclic(np_input_array, pi):
         else:
             raise e
 
-
-def is_valid_self_loops(np_input_array, pi):
-    """
-    Checks whether self-loops stem from valid DFS execution.
-    :param input:
-    :param pi:
-    :return:
-    """
-    g = nx.from_numpy_array(np_input_array)
-    for i in range(len(pi)):
-        if pi[i] == i:
-            for j in range(i):
-                reachable_by_earlier_node = nx.has_path(g, j, i)
-                if reachable_by_earlier_node:
-                    return False
-    return True
 
 #print(is_acyclic(acyclic_adj, acyclic_pi))
 #print(is_acyclic(cyclic_adj, cyclic_pi))
