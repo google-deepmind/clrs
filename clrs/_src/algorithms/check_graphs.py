@@ -32,19 +32,7 @@ edge_to_zero_adj = np.array([
 edge_to_zero_pi = [0,1]
 ## BREAKS!!!
 
-def replace_self_loops_with_minus1(pi):
-    for i in range(len(pi)):
-        if pi[i] == i:
-            pi[i] = -1
-    return pi
 
-def are_valid_edges_parents(np_input_array, pi):
-    for i in range(len(pi)): # for node in graph.
-        parent = pi[i]
-        if parent != i: # Not a restart, check edge parent->child. (assume restarts are always valid, check later).
-            if np_input_array[parent][i] == 0: # no edge parent -> child
-                return False
-    return True
 def check_valid_dfsTree(np_input_array, pi):
     '''checks: acyclic, dangling, edge-validity, and valid-start'''
     pi = pi[:] # copy pi. make sure don't mess with logging
@@ -63,6 +51,21 @@ def check_valid_dfsTree(np_input_array, pi):
     else:
         print('wrong startnode')
     return False
+
+
+def replace_self_loops_with_minus1(pi):
+    for i in range(len(pi)):
+        if pi[i] == i:
+            pi[i] = -1
+    return pi
+
+def are_valid_edges_parents(np_input_array, pi):
+    for i in range(len(pi)): # for node in graph.
+        parent = pi[i]
+        if parent != i: # Not a restart, check edge parent->child. (assume restarts are always valid, check later).
+            if np_input_array[parent][i] == 0: # no edge parent -> child
+                return False
+    return True
 
 def are_valid_order_parents(np_input_array, pi):
     """
