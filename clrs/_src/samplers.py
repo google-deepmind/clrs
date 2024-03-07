@@ -493,8 +493,8 @@ class BellmanFordSampler(Sampler):
       self,
       length: int,
       p: Tuple[float, ...] = (0.5,),
-      low: int = 2,
-      high: int = 4.,
+      low: int = 1,
+      high: int = 2,
   ):
     graph = self._int_weighted_random_er_graph(
         nb_nodes=length,

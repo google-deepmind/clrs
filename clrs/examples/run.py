@@ -294,6 +294,34 @@ def collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
     out.update(extras)
   return {k: unpack(v) for k, v in out.items()}
 
+
+def BF_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
+  """Collect batches of output and hint preds and evaluate them."""
+  processed_samples = 0
+  preds = []
+  outputs = []
+  As = []
+  while processed_samples < sample_count:
+    feedback = next(sampler)
+    batch_size = feedback.outputs[0].data.shape[0]
+    outputs.append(feedback.outputs)
+    new_rng_key, rng_key = jax.random.split(rng_key)
+    cur_preds, _ = predict_fn(new_rng_key, feedback.features)
+    preds.append(cur_preds)
+    processed_samples += batch_size
+    As.append(feedback[0][0][2].data)
+  outputs = _concat(outputs, axis=0)
+  As = _concat(As, axis=0)  # concatenate batches
+  #breakpoint()
+  preds = _concat(preds, axis=0)
+  out = clrs.evaluate(outputs, preds)
+  #breakpoint()
+  if extras:
+    out.update(extras)
+  return {k: unpack(v) for k, v in out.items()}
+
+
+
 def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
   """Collect batch of output preds and evaluate them."""
   processed_samples = 0
@@ -311,12 +339,12 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
     As.append(feedback[0][0][1].data)
   outputs = _concat(outputs, axis=0)
   As = _concat(As, axis=0) # concatenate batches
+  #breakpoint()
 
   ### We need preds and A. We want to
     # 1. Sample from preds a candidate tree
     # 2. run check_graphs on candidate tree (using A as groundtruth)
     # 3. Collect validity result into a dataframe.
-
 
 ##### RANDOM
   model_sample_random = sample_random_list(preds)
@@ -909,6 +937,13 @@ def main(unused_argv):
     #breakpoint()
     if FLAGS.algorithms[algo_idx] == "dfs":
         test_stats = DFS_collect_and_eval(
+            test_samplers[algo_idx],
+            functools.partial(eval_model.predict, algorithm_index=algo_idx),
+            test_sample_counts[algo_idx],
+            new_rng_key,
+            extras=common_extras)
+    elif FLAGS.algorithms[algo_idx] == 'bellman_ford':
+        test_stats = BF_collect_and_eval(
             test_samplers[algo_idx],
             functools.partial(eval_model.predict, algorithm_index=algo_idx),
             test_sample_counts[algo_idx],

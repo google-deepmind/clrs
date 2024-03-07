@@ -1262,7 +1262,7 @@ def bellman_ford(A: _Array, s: int) -> _Out:
   # print(parent_dist)
   probeslist[0]['output']['node']['pi']['data'] = parent_dist
 
-  #breakpoint() ## weird formatting error
+  #breakpoint()
   ## CHECK THE PUSHING!
   return parent_dist, probeslist[0]
 
