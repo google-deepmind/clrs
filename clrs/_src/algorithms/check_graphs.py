@@ -64,8 +64,12 @@ def are_valid_edges_parents(np_input_array, pi):
     for i in range(len(pi)): # for node in graph.
         parent = pi[i]
         if parent != i: # Not a restart, check edge parent->child. (assume restarts are always valid, check later).
-            if np_input_array[parent][i] == 0: # no edge parent -> child
-                return False
+            #breakpoint()
+            try:
+                if np_input_array[parent][i] == 0: # no edge parent -> child
+                    return False
+            except:
+                breakpoint()
     return True
 
 def are_valid_order_parents(np_input_array, pi):
