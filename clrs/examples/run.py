@@ -426,22 +426,23 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
   ##### UPWARDS
   model_sample_upwards = sample_upwards(preds)
   true_sample_upwards = sample_upwards(outputs)
+  #breakpoint()
 
-  model_upwards_truthmask = [check_graphs.check_valid_dfsTree(As[i], model_sample_upwards[i]) for i in range(len(model_sample_upwards))]
+  model_upwards_truthmask = [check_graphs.check_valid_dfsTree(As[i], model_sample_upwards[i].astype(int)) for i in range(len(model_sample_upwards))]
   correctness_model_upwards = sum(model_upwards_truthmask) / len(model_upwards_truthmask)
 
-  true_upwards_truthmask = [check_graphs.check_valid_dfsTree(As[i], true_sample_upwards[i]) for i in range(len(true_sample_upwards))]
+  true_upwards_truthmask = [check_graphs.check_valid_dfsTree(As[i], true_sample_upwards[i].astype(int)) for i in range(len(true_sample_upwards))]
   correctness_true_upwards = sum(true_upwards_truthmask) / len(true_upwards_truthmask)
 
   ##### ALTUPWARDS
   model_sample_altUpwards = sample_altUpwards(preds)
   true_sample_altUpwards = sample_altUpwards(outputs)
 
-  model_altUpwards_truthmask = [check_graphs.check_valid_dfsTree(As[i], model_sample_altUpwards[i]) for i in
+  model_altUpwards_truthmask = [check_graphs.check_valid_dfsTree(As[i], model_sample_altUpwards[i].astype(int)) for i in
                              range(len(model_sample_altUpwards))]
   correctness_model_altUpwards = sum(model_altUpwards_truthmask) / len(model_altUpwards_truthmask)
 
-  true_altUpwards_truthmask = [check_graphs.check_valid_dfsTree(As[i], true_sample_altUpwards[i]) for i in
+  true_altUpwards_truthmask = [check_graphs.check_valid_dfsTree(As[i], true_sample_altUpwards[i].astype(int)) for i in
                             range(len(true_sample_altUpwards))]
   correctness_true_altUpwards = sum(true_altUpwards_truthmask) / len(true_altUpwards_truthmask)
 
