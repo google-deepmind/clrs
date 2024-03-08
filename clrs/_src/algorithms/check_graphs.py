@@ -120,3 +120,10 @@ def is_acyclic(pi):
 #print(is_acyclic(cyclic_adj, cyclic_pi))
 
 #print(is_acyclic(disconnect_adj, disconnect_pi))
+
+
+
+##################################################################################################################
+# BELLMAN-FORD CHECKER
+##################################################################################################################
+# Test whether model's pi represents valid bellman-ford

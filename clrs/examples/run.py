@@ -316,6 +316,60 @@ def BF_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
   preds = _concat(preds, axis=0)
   out = clrs.evaluate(outputs, preds)
   #breakpoint()
+  # TODO sample from probabilities to values. Log Results
+
+  model_sample_random = sample_random_list(preds)
+  true_sample_random = sample_random_list(outputs)
+
+  model_random_truthmask = [check_graphs.check_valid_dfsTree(As[i], model_sample_random[i]) for i in range(len(model_sample_random))]
+  correctness_model_random = sum(model_random_truthmask) / len(model_random_truthmask)
+
+  true_random_truthmask = [check_graphs.check_valid_dfsTree(As[i], true_sample_random[i]) for i in range(len(true_sample_random))]
+  correctness_true_random = sum(true_random_truthmask) / len(true_random_truthmask)
+
+  ##### ARGMAX
+  ## remember to convert from jax arrays to lists for easy subsequent methods using .tolist()
+  model_sample_argmax = sample_argmax_listofdict(preds)
+  true_sample_argmax = sample_argmax_listofdatapoint(outputs)
+
+  # compute the fraction of trees sampled from model output fulfilling the necessary conditions
+  model_argmax_truthmask = [check_graphs.check_valid_dfsTree(As[i], model_sample_argmax[i].tolist()) for i in range(len(model_sample_argmax))]
+  correctness_model_argmax = sum(model_argmax_truthmask) / len(model_argmax_truthmask)
+
+  # compute the fraction of trees sampled from true distributions fulfilling the necessary conditions
+  true_argmax_truthmask = [check_graphs.check_valid_dfsTree(As[i], true_sample_argmax[i].tolist()) for i in range(len(true_sample_argmax))]
+  correctness_true_argmax = sum(true_argmax_truthmask) / len(true_argmax_truthmask)
+
+  
+  ### LOGGING ###
+  As = [i.flatten() for i in As]
+  result_dict = {"As": As,
+                 #
+                 "Argmax_Model_Trees": model_sample_argmax,
+                 "Argmax_True_Trees": true_sample_argmax,
+                 #
+                 "Argmax_Model_Mask": model_argmax_truthmask,
+                 "Argmax_True_Mask": true_argmax_truthmask,
+                 #
+                 "Argmax_Model_Accuracy": correctness_model_argmax,
+                 "Argmax_True_Accuracy": correctness_true_argmax,
+                 #
+                 ###
+                 #
+                 "Random_Model_Trees": model_sample_random,
+                 "Random_True_Trees": true_sample_random,
+                 #
+                 "Random_Model_Mask": model_random_truthmask,
+                 "Random_True_Mask": true_random_truthmask,
+                 #
+                 "Random_Model_Accuracy": correctness_model_random,
+                 "Random_True_Accuracy": correctness_true_random,
+                 #
+                 ###
+                 }
+  result_df = pd.DataFrame.from_dict(result_dict)
+  result_df.to_csv('bf_accuracy.csv', encoding='utf-8', index=False)
+  
   if extras:
     out.update(extras)
   return {k: unpack(v) for k, v in out.items()}
@@ -350,10 +404,10 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
   model_sample_random = sample_random_list(preds)
   true_sample_random = sample_random_list(outputs)
 
-  model_random_truthmask = [check_graphs.is_acyclic(As[i], model_sample_random[i]) for i in range(len(model_sample_random))]
+  model_random_truthmask = [check_graphs.check_valid_dfsTree(As[i], model_sample_random[i]) for i in range(len(model_sample_random))]
   correctness_model_random = sum(model_random_truthmask) / len(model_random_truthmask)
 
-  true_random_truthmask = [check_graphs.is_acyclic(As[i], true_sample_random[i]) for i in range(len(true_sample_random))]
+  true_random_truthmask = [check_graphs.check_valid_dfsTree(As[i], true_sample_random[i]) for i in range(len(true_sample_random))]
   correctness_true_random = sum(true_random_truthmask) / len(true_random_truthmask)
 
 ##### ARGMAX
@@ -362,32 +416,32 @@ def DFS_collect_and_eval(sampler, predict_fn, sample_count, rng_key, extras):
   true_sample_argmax = sample_argmax_listofdatapoint(outputs)
 
   # compute the fraction of trees sampled from model output fulfilling the necessary conditions
-  model_argmax_truthmask = [check_graphs.is_acyclic(As[i],model_sample_argmax[i].tolist()) for i in range(len(model_sample_argmax))]
+  model_argmax_truthmask = [check_graphs.check_valid_dfsTree(As[i],model_sample_argmax[i].tolist()) for i in range(len(model_sample_argmax))]
   correctness_model_argmax = sum(model_argmax_truthmask) / len(model_argmax_truthmask)
 
   # compute the fraction of trees sampled from true distributions fulfilling the necessary conditions
-  true_argmax_truthmask = [check_graphs.is_acyclic(As[i], true_sample_argmax[i].tolist()) for i in range(len(true_sample_argmax))]
+  true_argmax_truthmask = [check_graphs.check_valid_dfsTree(As[i], true_sample_argmax[i].tolist()) for i in range(len(true_sample_argmax))]
   correctness_true_argmax = sum(true_argmax_truthmask) / len(true_argmax_truthmask)
 
   ##### UPWARDS
   model_sample_upwards = sample_upwards(preds)
   true_sample_upwards = sample_upwards(outputs)
 
-  model_upwards_truthmask = [check_graphs.is_acyclic(As[i], model_sample_upwards[i]) for i in range(len(model_sample_upwards))]
+  model_upwards_truthmask = [check_graphs.check_valid_dfsTree(As[i], model_sample_upwards[i]) for i in range(len(model_sample_upwards))]
   correctness_model_upwards = sum(model_upwards_truthmask) / len(model_upwards_truthmask)
 
-  true_upwards_truthmask = [check_graphs.is_acyclic(As[i], true_sample_upwards[i]) for i in range(len(true_sample_upwards))]
+  true_upwards_truthmask = [check_graphs.check_valid_dfsTree(As[i], true_sample_upwards[i]) for i in range(len(true_sample_upwards))]
   correctness_true_upwards = sum(true_upwards_truthmask) / len(true_upwards_truthmask)
 
   ##### ALTUPWARDS
   model_sample_altUpwards = sample_altUpwards(preds)
   true_sample_altUpwards = sample_altUpwards(outputs)
 
-  model_altUpwards_truthmask = [check_graphs.is_acyclic(As[i], model_sample_altUpwards[i]) for i in
+  model_altUpwards_truthmask = [check_graphs.check_valid_dfsTree(As[i], model_sample_altUpwards[i]) for i in
                              range(len(model_sample_altUpwards))]
   correctness_model_altUpwards = sum(model_altUpwards_truthmask) / len(model_altUpwards_truthmask)
 
-  true_altUpwards_truthmask = [check_graphs.is_acyclic(As[i], true_sample_altUpwards[i]) for i in
+  true_altUpwards_truthmask = [check_graphs.check_valid_dfsTree(As[i], true_sample_altUpwards[i]) for i in
                             range(len(true_sample_altUpwards))]
   correctness_true_altUpwards = sum(true_altUpwards_truthmask) / len(true_altUpwards_truthmask)
 
@@ -464,6 +518,7 @@ def sample_argmax_listofdict(preds):
     return trees
 
 def sample_argmax_listofdatapoint(outputs):
+    '''argmax'ing index for each row in probMatrix'''
     trees = []
     for i in outputs: #de-listify into datapoint
         distlist = i.data
@@ -474,6 +529,7 @@ def sample_argmax_listofdatapoint(outputs):
     return trees
 
 def sample_random_list(outsOrPreds):
+    '''Random Number for each row in probMatrix'''
     trees = []
     rng = np.random.default_rng()
     for i in outsOrPreds:
@@ -498,7 +554,6 @@ def leafinessSort(probMatrix):
     '''
     sums = np.sum(probMatrix, axis=0)
     # sort by sum column, remember the original column number
-    # FIXME implement
     leafiness = np.argsort(sums)
     return leafiness
 
