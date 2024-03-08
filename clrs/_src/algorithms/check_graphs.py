@@ -1,6 +1,7 @@
 import graphlib as gl
 import networkx as nx
 import numpy as np
+import chex
 
 ## f[0][0][1].data to get adjacency matrix from next(sampler) where sampler=test_samplers[0]
 
@@ -127,3 +128,64 @@ def is_acyclic(pi):
 # BELLMAN-FORD CHECKER
 ##################################################################################################################
 # Test whether model's pi represents valid bellman-ford
+
+
+
+def bellman_ford(A, s):
+  """Bellman-Ford's single-source shortest path (Bellman, 1958).
+  This has been taken and adapted from the original CLRS Bellman-Ford implementation"""
+
+
+  chex.assert_rank(A, 2)
+
+  A_pos = np.arange(A.shape[0])
+
+  d = np.zeros(A.shape[0])
+  pi = np.arange(A.shape[0])
+  msk = np.zeros(A.shape[0])
+  d[s] = 0
+  msk[s] = 1
+  while True:
+    prev_d = np.copy(d)
+    prev_msk = np.copy(msk)
+    for u in range(A.shape[0]):
+      for v in range(A.shape[0]):
+        if prev_msk[u] == 1 and A[u, v] != 0:
+          if msk[v] == 0 or prev_d[u] + A[u, v] < d[v]:
+            d[v] = prev_d[u] + A[u, v]
+            pi[v] = u
+          msk[v] = 1
+    if np.all(d == prev_d):
+      break
+  return d
+
+def check_valid_BFpaths(A,s, parentpath):
+
+    true_costs = bellman_ford(A,s)
+
+    # the adjacency matrix of the BFS tree
+    BF_tree_adj = np.zeros((len(parentpath),len(parentpath)))
+    for i in range(len(parentpath)):
+        BF_tree_adj[parentpath[i],i] = A[parentpath[i],i]
+
+    hallucinations = check_nohallucinations(A, BF_tree_adj)
+    if hallucinations:
+        return False
+    model_costs = bellman_ford(BF_tree_adj, s)
+
+    if true_costs == model_costs:
+        return True
+    else:
+        return False
+
+
+def check_nohallucinations(A,BF_tree):
+
+    subtracted_adj = A - BF_tree
+    if (subtracted_adj < 0).any():
+        return False
+    else:
+        return True
+
+
+
