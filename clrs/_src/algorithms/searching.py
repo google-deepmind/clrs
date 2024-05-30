@@ -179,7 +179,8 @@ def quickselect(
               'i': probing.mask_one(A_pos[i + 1], A.shape[0]),
               'j': probing.mask_one(A_pos[j], A.shape[0]),
               'i_rank': (i + 1) * 1.0 / A.shape[0],
-              'target': target * 1.0 / A.shape[0]
+              'target': target * 1.0 / A.shape[0],
+              'pivot': probing.mask_one(A_pos[r], A.shape[0]),
           })
 
     tmp = A[i + 1]
@@ -199,8 +200,10 @@ def quickselect(
             'i': probing.mask_one(A_pos[i + 1], A.shape[0]),
             'j': probing.mask_one(A_pos[r], A.shape[0]),
             'i_rank': (i + 1 - p) * 1.0 / A.shape[0],
-            'target': target * 1.0 / A.shape[0]
-        })
+            'target': target * 1.0 / A.shape[0],
+            'pivot': probing.mask_one(A_pos[i + 1], A.shape[0]),
+        },
+        )
 
     return i + 1
 
