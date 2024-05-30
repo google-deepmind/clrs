@@ -145,7 +145,7 @@ def finalize(probes: ProbesDict):
         else:
           # Only one instance of input/output exist. Remove leading axis.
           probes[stage][loc][name]['data'] = np.squeeze(
-              np.array(probes[stage][loc][name]['data']))
+              np.array(probes[stage][loc][name]['data']), axis=0)
 
 
 def split_stages(

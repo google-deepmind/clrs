@@ -161,7 +161,8 @@ SPECS = types.MappingProxyType({
         'i': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'j': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'i_rank': (Stage.HINT, Location.GRAPH, Type.SCALAR),
-        'target': (Stage.HINT, Location.GRAPH, Type.SCALAR)
+        'target': (Stage.HINT, Location.GRAPH, Type.SCALAR),
+        'pivot': (Stage.HINT, Location.NODE, Type.MASK_ONE),
     },
     'minimum': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
