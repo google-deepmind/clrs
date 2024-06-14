@@ -178,22 +178,20 @@ def sample_to_str(
 
     Output examples with hints:
       1. insertion_sort
-          input_str = 'key: [0.549 0.715 0.603 0.545 0.424], trace:
-                      0->1->2->3->4'
+          input_str = 'insertion_sort: key: [0.549 0.715 0.603], initial_trace:
+          [0.549 0.715 0.603] trace | pred:'
           output_names_strs = 'pred'
-          output_str = '[0.549 0.715 0.603 0.545 0.424],
-                        [0.549 0.603 0.715 0.545 0.424],
-                        [0.545 0.549 0.603 0.715 0.424],
-                        [0.424 0.545 0.549 0.603 0.715]
-                        | [0.424 0.545 0.549 0.603 0.715]'
+          output_str = '[0.549 0.715 0.603] | [0.549 0.603 0.715]'
       2. find_maximum_subarray
-          input_str = 'key: [0.098 0.43 0.206 0.09 -0.153]'
-          output_names_strs = 'start, end'
-          output_str = '0, 3'
+          input_str = 'find_maximum_subarray_kadane: key: [0.098 0.43 0.206],
+          initial_trace: (0, 0) trace | (best_low, best_high):'
+          output_names_strs = 'best_low, best_high'
+          output_str = '(0, 1) | (0, 2)'
       3. binary_search
-          input_str = 'key: [0.424 0.545 0.549 0.603 0.715], target: 0.646'
+          input_str = 'binary_search: key: [0.549 0.603 0.715], target: 0.545,
+          initial_trace: (0, 2) trace | (low, high):'
           output_names_strs = 'return'
-          output_str = '4'
+          output_str = '(0, 1) | (0, 0)'
 
     For more details about task specs refer to
     clrs._src.specs
