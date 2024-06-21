@@ -5,7 +5,7 @@ from clrs._src.clrs_text.clrs_utils import format_clrs_example
 import itertools
 
 
-def clrs_gen(algs: Dict[str, List[int]], num_samples: int, seed: int = 0, use_hints: bool = True):
+def clrs_gen(algs: Dict[str, List[int]], num_samples: int, seed: int = 0, use_hints: bool = True, pretrain: bool = False):
     """
     Huggingface datasets.Dataset compatible generator function for creating a dataset of fixed size
 
@@ -22,6 +22,7 @@ def clrs_gen(algs: Dict[str, List[int]], num_samples: int, seed: int = 0, use_hi
         num_samples (int): The size of the output dataset
         seed (int), default=0: The random seed for all of the generators
         use_hints (bool), default=True: Whether to include hints in the questions
+        pretrain (bool), default=False: Whether to combine the question and answer into one field called text
  
     Returns:
         Sample question and answer as a dictionary
@@ -47,15 +48,21 @@ def clrs_gen(algs: Dict[str, List[int]], num_samples: int, seed: int = 0, use_hi
     for _ in range(num_samples):
         sampler_name = next(keys)
         sample = choices[sampler_name].next(batch_size=1) # get one sample from the sampler
+        algorithm_name = sampler_name.split('=')[0] # algorithm name, split at = sign
+        algorithm_size = sampler_name.split('=')[1]
         question, answer = format_clrs_example(
-                                sampler_name.split('=')[0], # algorithm name, split at = sign
+                                algorithm_name,
                                 sample,
                                 use_hints=use_hints,
                             )
-        yield {"question": question, "answer": answer}
+        if pretrain:
+            text = question + answer
+            yield {"text": text, "name": algorithm_name, "size": algorithm_size}
+        else:
+            yield {"question": question, "answer": answer, "name": algorithm_name, "size": algorithm_size}
 
 
-def clrs_gen_inf(algs: Dict[str, List[int]], seed: int = 0, use_hints: bool = True):
+def clrs_gen_inf(algs: Dict[str, List[int]], seed: int = 0, use_hints: bool = True, pretrain: bool = False):
     """
     Huggingface datasets.IterableDataset compatible generator function for creating a dataset of infinite size
 
@@ -63,7 +70,11 @@ def clrs_gen_inf(algs: Dict[str, List[int]], seed: int = 0, use_hints: bool = Tr
         import datasets
         algs = {"insertion_sort": [16]}
         ds = datasets.IterableDataset.from_generator(clrs_gen_inf, features=datasets.Features({'question': datasets.Value(dtype='string', id=None), 'answer': datasets.Value(dtype='string', id=None)}), gen_kwargs={"algs": algs}
-
+        ds = IterableDataset.from_generator(clrs_gen_inf, features=Features({'question': Value(dtype='string', id=None), 'answer': Value(dtype='string', id=None), 'name': Value(dtype='string', id=None), 'size': Value(dtype='string', id=None)}), gen_kwargs={"algs": alg_lens})
+        
+        OR if using pretraining = True:
+        ds = IterableDataset.from_generator(clrs_gen_inf, features=Features({'text': Value(dtype='string', id=None), 'name': Value(dtype='string', id=None), 'size': Value(dtype='string', id=None)}), gen_kwargs={"algs": alg, "pretrain": True})
+        
     Huggingface reference:
         https://huggingface.co/docs/datasets/v2.7.0/en/package_reference/main_classes#datasets.IterableDataset.from_generator
 
@@ -71,6 +82,7 @@ def clrs_gen_inf(algs: Dict[str, List[int]], seed: int = 0, use_hints: bool = Tr
         algs (Dict[str, List[int]]): keys = algorithm names [Must be same as in clrs.CLRS_30_ALGS_SETTINGS.keys()], values = list of lengths required for that algorithm
         seed (int), default=0: The random seed for all of the generators
         use_hints (bool), default=True: Whether to include hints in the questions
+        pretrain (bool), default=False: Whether to combine the question and answer into one field called text
  
     Returns:
         Sample question and answer as a dictionary
@@ -96,9 +108,15 @@ def clrs_gen_inf(algs: Dict[str, List[int]], seed: int = 0, use_hints: bool = Tr
     while True:
         sampler_name = next(keys)
         sample = choices[sampler_name].next(batch_size=1) # get one sample from the sampler
+        algorithm_name = sampler_name.split('=')[0] # algorithm name, split at = sign
+        algorithm_size = sampler_name.split('=')[1]
         question, answer = format_clrs_example(
-                                sampler_name.split('=')[0], # algorithm name, split at = sign
+                                algorithm_name,
                                 sample,
                                 use_hints=use_hints,
                             )
-        yield {"question": question, "answer": answer}
+        if pretrain:
+            text = question + answer
+            yield {"text": text, "name": algorithm_name, "size": algorithm_size}
+        else:
+            yield {"question": question, "answer": answer, "name": algorithm_name, "size": algorithm_size}
