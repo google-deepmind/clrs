@@ -5,7 +5,7 @@ from clrs._src.clrs_text.clrs_utils import format_clrs_example
 import itertools
 
 
-def clrs_gen(algs: Dict[str, List[int]], num_samples: int, seed: int = 0, use_hints: bool = True, pretrain: bool = False):
+def clrs_generator(algos_and_lengths: Dict[str, List[int]], num_samples: int, seed: int = 0, use_hints: bool = True, pretrain: bool = False):
     """
     Huggingface datasets.Dataset compatible generator function for creating a dataset of fixed size
 
@@ -30,8 +30,8 @@ def clrs_gen(algs: Dict[str, List[int]], num_samples: int, seed: int = 0, use_hi
     choices = {}
 
     # make all of the possible generators
-    for alg in algs.keys():
-        for length in algs[alg]:
+    for algo_name, lengths in algos_and_lengths.items():
+        for length in lengths:
             sampler, _ = build_sampler(
                 alg,
                 seed=seed,
