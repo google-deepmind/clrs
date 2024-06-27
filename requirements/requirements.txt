@@ -4,6 +4,7 @@ chex>=0.0.8
 dm-haiku>=0.0.4
 jax>=0.2.18
 jaxlib>=0.1.69
+ml_collections>=0.1.1
 numpy>=1.21.1
 opt-einsum>=3.3.0
 optax>=0.0.9
