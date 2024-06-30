@@ -8,7 +8,7 @@ from clrs._src.clrs_text import clrs_utils, huggingface_generators
 
 
 class TestFormatCLRSExamplesHFDataset(parameterized.TestCase):
-    """Based on TestFormatCLRSExamples in clrs.src_.clrs_text.clrs_utils_test.py"""
+    """Based on TestFormatCLRSExamples in clrs.src_.clrs_text.clrs_utils_test.py."""
 
     @parameterized.product(
         algo_name=list(clrs.CLRS_30_ALGS_SETTINGS.keys()),
@@ -26,6 +26,8 @@ class TestFormatCLRSExamplesHFDataset(parameterized.TestCase):
                 "use_hints": use_hints,
             },
         )
+
+        self.assertEqual(len(ds), 100)
 
         for sample in ds:
             (
@@ -58,7 +60,7 @@ class TestFormatCLRSExamplesHFDataset(parameterized.TestCase):
 
             if (
                 use_hints and algo_name in clrs_utils.CLRS_TASKS_WITH_HINTS
-            ):  # segments intersect has no hints option
+            ):  # segments intersect has no hints option.
                 self.assertIn("trace | ", question)
                 self.assertIn("initial_trace:", question)
                 self.assertIn("trace | ", text)
@@ -71,7 +73,7 @@ class TestFormatCLRSExamplesHFDataset(parameterized.TestCase):
 
 
 class TestFormatCLRSExamplesHFIterableDataset(parameterized.TestCase):
-    """Based on TestFormatCLRSExamples in clrs.src_.clrs_text.clrs_utils_test.py"""
+    """Based on TestFormatCLRSExamples in clrs.src_.clrs_text.clrs_utils_test.py."""
 
     @parameterized.product(
         algo_name=list(clrs.CLRS_30_ALGS_SETTINGS.keys()),
@@ -82,7 +84,7 @@ class TestFormatCLRSExamplesHFIterableDataset(parameterized.TestCase):
         """Test that we can format samples from any algo into strings from a hf IterableDataset."""
         algos_and_lengths = {algo_name: lengths}
         ds = IterableDataset.from_generator(
-            huggingface_generators.clrs_infinite_generator,
+            huggingface_generators.clrs_generator,
             features=Features(
                 {
                     "text": Value(dtype="string", id=None),
@@ -93,11 +95,15 @@ class TestFormatCLRSExamplesHFIterableDataset(parameterized.TestCase):
                     "use_hints": Value(dtype="bool_", id=None),
                 }
             ),
-            gen_kwargs={"algos_and_lengths": algos_and_lengths, "use_hints": use_hints},
+            gen_kwargs={
+                "algos_and_lengths": algos_and_lengths,
+                "use_hints": use_hints,
+                "num_samples": None,
+            },
         )
 
         ds_iterator = iter(ds)
-        for _ in range(100):  # only test 100 samples as we have infinite sampling on
+        for _ in range(100):  # only test 100 samples as we have infinite sampling on.
             sample = next(ds_iterator)
             (
                 text,
@@ -129,7 +135,7 @@ class TestFormatCLRSExamplesHFIterableDataset(parameterized.TestCase):
 
             if (
                 use_hints and algo_name in clrs_utils.CLRS_TASKS_WITH_HINTS
-            ):  # segments intersect has no hints option
+            ):  # segments intersect has no hints option.
                 self.assertIn("trace | ", question)
                 self.assertIn("initial_trace:", question)
                 self.assertIn("trace | ", text)
