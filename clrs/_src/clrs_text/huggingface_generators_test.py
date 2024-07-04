@@ -28,7 +28,7 @@ class TestCLRSGenerator(parameterized.TestCase):
   """Check that the generator output matches the expected format."""
 
   @parameterized.product(
-      algo_name=list(clrs.CLRS_30_ALGS_SETTINGS.keys())[:1],
+      algo_name=list(clrs.CLRS_30_ALGS_SETTINGS.keys()),
       lengths=[[4, 8]],
       use_hints=[True, False],
       dataset_from_generator_and_num_samples=[
