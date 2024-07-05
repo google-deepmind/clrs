@@ -19,10 +19,21 @@ This script generates a dataset of CLRS text samples in json format.
 This dataset is generated with the same parameters which were used in:
 "The CLRS-Text Algorithmic Reasoning Language Benchmark". ICML DMLR'24.
  https://arxiv.org/abs/2406.04229
+
+Generate train dataset:
+```
+python generate_clrs_text.py --split_name train
+```
+
+Generate eval dataset:
+```
+python generate_clrs_text.py --split_name val
+```
 """
 
 from collections.abc import Callable
 import functools
+import itertools
 import json
 import os
 import shutil
@@ -39,9 +50,7 @@ from ml_collections import config_flags
 import tensorflow as tf
 import tqdm
 
-
-# Default algo/length config dict.
-_DEFAULT_ALGOS_AND_LENGTHS = config_dict.ConfigDict({
+_DEFAULT_TRAIN_ALGOS_AND_LENGTHS = {
     'articulation_points': [4, 5, 10, 11, 12, 15, 19],
     'activity_selector': [4, 5, 10, 11, 12, 15, 19, 23, 28, 31],
     'bellman_ford': [4, 5, 10, 11, 12, 15, 19, 23, 28, 31],
@@ -72,18 +81,58 @@ _DEFAULT_ALGOS_AND_LENGTHS = config_dict.ConfigDict({
     'strongly_connected_components': [4, 5, 10, 11, 12, 15],
     'task_scheduling': [4, 5, 10, 11, 12, 15, 19, 23, 28, 31],
     'topological_sort': [4, 5, 10, 11, 12, 15, 19, 23],
-})
+}
+_DEFAULT_TRAIN_NUMBER_OF_SAMPLES = 10_000
+_DEFAULT_TRAIN_SEEDS = [0]
+
+_DEFAULT_VAL_ALGOS_AND_LENGTHS = {
+    'activity_selector': list(range(4, 41)),
+    'articulation_points': list(range(4, 20)),
+    'bellman_ford': list(range(4, 33)),
+    'bfs': list(range(4, 42)),
+    'binary_search': list(range(4, 65)),
+    'bridges': list(range(4, 8)),
+    'bubble_sort': list(range(4, 12)),
+    'dag_shortest_paths': list(range(4, 20)),
+    'dfs': list(range(4, 21)),
+    'dijkstra': list(range(4, 26)),
+    'find_maximum_subarray_kadane': list(range(4, 65)),
+    'floyd_warshall': list(range(4, 12)),
+    'graham_scan': list(range(4, 32)),
+    'heapsort': list(range(4, 12)),
+    'insertion_sort': list(range(4, 26)),
+    'jarvis_march': list(range(4, 14)),
+    'kmp_matcher': list(range(4, 65)),
+    'lcs_length': list(range(4, 13)),
+    'matrix_chain_order': list(range(4, 13)),
+    'minimum': list(range(4, 65)),
+    'mst_kruskal': list(range(4, 11)),
+    'mst_prim': list(range(4, 27)),
+    'naive_string_matcher': list(range(4, 65)),
+    'optimal_bst': list(range(4, 11)),
+    'quickselect': list(range(4, 65)),
+    'quicksort': list(range(4, 13)),
+    'segments_intersect': list(range(4, 65)),
+    'strongly_connected_components': list(range(4, 17)),
+    'task_scheduling': list(range(4, 42)),
+    'topological_sort': list(range(4, 22)),
+}
+_DEFAULT_VAL_NUMBER_OF_SAMPLES = 125
+_DEFAULT_VAL_SEEDS = [3, 14, 35, 81, 94]
 
 _ALGOS_AND_LENGTHS = config_flags.DEFINE_config_dict(
     'algos_and_lengths',
-    _DEFAULT_ALGOS_AND_LENGTHS,
-    'The algorithm and lengths.',
+    config_dict.ConfigDict(),
+    "The algorithm and lengths. If it's empty and `split_name` is `train` or"
+    ' `val`, the default algos and lengths will be used.',
 )
 _USE_HINTS = flags.DEFINE_bool('use_hints', False, 'Whether to use hints.')
 _NUMBER_OF_SAMPLES = flags.DEFINE_integer(
     'number_of_samples',
-    10_000,
-    'The number of samples to generate.',
+    -1,
+    "The number of samples to generate. If it's -1 and `algos_and_lengths` is"
+    ' empty, the default number of samples will be used for `train` and `val`'
+    ' split_name.',
 )
 _PATH_TO_SAVE = flags.DEFINE_string(
     'path_to_save',
@@ -91,7 +140,13 @@ _PATH_TO_SAVE = flags.DEFINE_string(
     'The path to save the dataset.',
 )
 _SPLIT_NAME = flags.DEFINE_string('split_name', 'train', 'The split name.')
-_SEED = flags.DEFINE_integer('seed', 0, 'The seed to use.')
+_SEEDS = flags.DEFINE_list(
+    'seeds',
+    [],
+    "The seeds to use. If it's empty and `algos_and_lengths` is"
+    ' empty, the default seeds will be used for `train` and `val`'
+    ' split_name.',
+)
 
 
 CLRS_SAMPLE_SPEC = {
@@ -247,6 +302,86 @@ def generate_clrs_algo_dataset(
   return dataset
 
 
+def _update_generation_params(
+    algos_and_lengths: dict[str, list[int]],
+    number_of_samples: int,
+    seeds: list[str],
+) -> tuple[dict[str, list[int]], int, list[int]]:
+  """Updates generation params.
+
+  Args:
+    algos_and_lengths: The algos and lengths.
+    number_of_samples: The number of samples to generate.
+    seeds: The seeds to use.
+
+  Returns:
+    The updated algos and lengths, number of samples, and seeds.
+  """
+  seeds = [int(seed) for seed in seeds]
+
+  if not algos_and_lengths:
+    logging.info(
+        'Setting default algos and lengths for split `%s`. Because'
+        ' `algos_and_lengths` is None.',
+        _SPLIT_NAME.value,
+    )
+    match _SPLIT_NAME.value:
+      case 'train':
+        algos_and_lengths = _DEFAULT_TRAIN_ALGOS_AND_LENGTHS
+      case 'val':
+        algos_and_lengths = _DEFAULT_VAL_ALGOS_AND_LENGTHS
+      case _:
+        raise ValueError(
+            f'Unsupported split name {_SPLIT_NAME.value} for empty'
+            ' `algos_and_lengths` flag. Supported split names are train and'
+            ' val.'
+        )
+
+    if not seeds:
+      logging.info(
+          'Setting default seeds for split `%s`. Because `seeds` is None.',
+          _SPLIT_NAME.value,
+      )
+      match _SPLIT_NAME.value:
+        case 'train':
+          seeds = _DEFAULT_TRAIN_SEEDS
+        case 'val':
+          seeds = _DEFAULT_VAL_SEEDS
+        case _:
+          raise ValueError(
+              f'Unsupported split name {_SPLIT_NAME.value} for empty'
+              ' `algos_and_lengths` flag. Supported split names are train and'
+              ' val.'
+          )
+    if number_of_samples == -1:
+      logging.info(
+          'Setting default number of samples for split `%s`. Because'
+          ' `number_of_samples` is None.',
+          _SPLIT_NAME.value,
+      )
+      match _SPLIT_NAME.value:
+        case 'train':
+          number_of_samples = _DEFAULT_TRAIN_NUMBER_OF_SAMPLES
+        case 'val':
+          number_of_samples = _DEFAULT_VAL_NUMBER_OF_SAMPLES
+        case _:
+          raise ValueError(
+              f'Unsupported split name {_SPLIT_NAME.value} for empty'
+              ' `algos_and_lengths` flag. Supported split names are train and'
+              ' val.'
+          )
+  else:
+    if number_of_samples == -1:
+      raise ValueError(
+          'Number of samples must be set when `algos_and_lengths` is not None.'
+      )
+    if not seeds:
+      raise ValueError(
+          'Seeds must be set when `algos_and_lengths` is not None.'
+      )
+  return algos_and_lengths, number_of_samples, seeds
+
+
 def main(_: Sequence[str]) -> None:
   # Remove previous dataset if existed.
   if os.path.exists(_PATH_TO_SAVE.value):
@@ -258,6 +393,12 @@ def main(_: Sequence[str]) -> None:
   os.makedirs(_PATH_TO_SAVE.value)
 
   # Recreate the split directory.
+  algos_and_lengths, number_of_samples, seeds = _update_generation_params(
+      _ALGOS_AND_LENGTHS.value,
+      _NUMBER_OF_SAMPLES.value,
+      _SEEDS.value,
+  )
+
   logging.info(
       'Creating split dir %s at %s.',
       _SPLIT_NAME.value,
@@ -267,15 +408,15 @@ def main(_: Sequence[str]) -> None:
   os.makedirs(split_path)
 
   # Generate JSON one per algorithm.
-  for algo_name, lengths in tqdm.tqdm(_ALGOS_AND_LENGTHS.value.items()):
+  for algo_name, lengths in tqdm.tqdm(algos_and_lengths.items()):
     samples = []
-    for length in lengths:
+    for length, seed in itertools.product(lengths, seeds):
       config = get_dataset_config(
           algo_name=algo_name,
           length=length,
-          number_of_samples=_NUMBER_OF_SAMPLES.value,
+          number_of_samples=number_of_samples,
           use_hints=_USE_HINTS.value,
-          seed=_SEED.value,
+          seed=seed,
       )
       dataset = generate_clrs_algo_dataset(config)
       samples.extend(
