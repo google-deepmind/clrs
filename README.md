@@ -20,7 +20,7 @@ pip install dm-clrs
 or directly from GitHub (updated more frequently):
 
 ```shell
-pip install git+git://github.com/deepmind/clrs.git
+pip install git+https://github.com/google-deepmind/clrs.git
 ```
 
 You may prefer to install it in a virtual environment if any requirements
@@ -29,7 +29,7 @@ clash with your Python installation:
 ```shell
 python3 -m venv clrs_env
 source clrs_env/bin/activate
-pip install git+git://github.com/deepmind/clrs.git
+pip install git+https://github.com/google-deepmind/clrs.git
 ```
 
 Once installed you can run our example baseline model:
@@ -225,6 +225,14 @@ for feedback in _iterate_sampler(batch_size=32):
 
 ```
 
+Most recently, we are offering [**CLRS-Text**](https://github.com/google-deepmind/clrs/tree/master/clrs/_src/clrs_text),
+a text-based variant of the benchmark suitable for training and evaluating the algorithmic reasoning
+capabilities of language models. Please see the relevant subfolder for a
+dedicated README file.
+
+You may also see the [companion paper](https://arxiv.org/abs/2406.04229) on
+CLRS-Text.
+
 ## Adding new algorithms
 
 Adding a new algorithm to the task suite requires the following steps:
@@ -257,5 +265,18 @@ To cite the CLRS Algorithmic Reasoning Benchmark:
     Raia Hadsell and Charles Blundell},
   journal={arXiv preprint arXiv:2205.15659},
   year={2022}
+}
+```
+
+To cite the CLRS-Text Algorithmic Reasoning Language Benchmark:
+
+```latex
+@article{deepmind2024clrstext,
+  title={The CLRS-Text Algorithmic Reasoning Language Benchmark},
+  author={Larisa Markeeva and Sean McLeish and Borja Ibarz and Wilfried Bounsi
+    and Olga Kozlova and Alex Vitvitskyi and Charles Blundell and
+    Tom Goldstein and Avi Schwarzschild and Petar Veli\v{c}kovi\'{c}},
+  journal={arXiv preprint arXiv:2406.04229},
+  year={2024}
 }
 ```

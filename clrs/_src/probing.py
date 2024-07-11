@@ -233,6 +233,7 @@ def heap(A_pos: np.ndarray, heap_size: int) -> np.ndarray:
 
 def graph(A: np.ndarray) -> np.ndarray:
   """Constructs a `graph` probe."""
+  probe = (A != 0) * 1.0
   probe = ((A + np.eye(A.shape[0])) != 0) * 1.0
   return probe
 
