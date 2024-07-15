@@ -58,7 +58,7 @@ from clrs._src.specs import SPECS
 from clrs._src.specs import Stage
 from clrs._src.specs import Type
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 
 __all__ = (
     "ALGO_IDX_INPUT_NAME",
@@ -68,6 +68,7 @@ __all__ = (
     "CLRS_30_ALGS_SETTINGS",
     "create_chunked_dataset",
     "create_dataset",
+    "clrs_text",
     "get_clrs_folder",
     "get_dataset_gcp_url",
     "get_processor_factory",
