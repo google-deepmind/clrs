@@ -18,9 +18,12 @@ import functools
 
 from absl.testing import absltest
 from absl.testing import parameterized
-import clrs
+
 from clrs._src.clrs_text import clrs_utils
 from clrs._src.clrs_text import huggingface_generators
+
+import clrs._src.specs as clrs_spec
+
 import datasets
 
 
@@ -28,7 +31,7 @@ class TestCLRSGenerator(parameterized.TestCase):
   """Check that the generator output matches the expected format."""
 
   @parameterized.product(
-      algo_name=list(clrs.CLRS_30_ALGS_SETTINGS.keys()),
+      algo_name=list(clrs_spec.CLRS_30_ALGS_SETTINGS.keys()),
       lengths=[[4, 8]],
       use_hints=[True, False],
       dataset_from_generator_and_num_samples=[
@@ -89,7 +92,7 @@ class TestCLRSGenerator(parameterized.TestCase):
   def test_auxiliary_fields(self, lengths, use_hints):
     """Test that the auxiliary fields are set correctly."""
     algos_and_lengths = {
-        algo_name: lengths for algo_name in clrs.CLRS_30_ALGS_SETTINGS
+        algo_name: lengths for algo_name in clrs_spec.CLRS_30_ALGS_SETTINGS
     }
     clrs_ds = datasets.Dataset.from_generator(
         huggingface_generators.clrs_generator,

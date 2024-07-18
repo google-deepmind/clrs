@@ -17,7 +17,7 @@
 import random
 from typing import Dict, List, Optional
 
-import clrs
+from clrs._src import samplers
 from clrs._src.clrs_text import clrs_utils
 
 
@@ -86,7 +86,7 @@ def clrs_generator(
   # make all of the possible generators.
   for algo_name, lengths in algos_and_lengths.items():
     for length in lengths:
-      sampler, _ = clrs.build_sampler(
+      sampler, _ = samplers.build_sampler(
           algo_name,
           seed=seed,
           num_samples=-1,

@@ -21,6 +21,7 @@ from clrs._src import algorithms
 from clrs._src import clrs_text
 from clrs._src import decoders
 from clrs._src import processors
+from clrs._src import specs
 
 from clrs._src.dataset import chunkify
 from clrs._src.dataset import CLRSDataset
@@ -77,6 +78,7 @@ __all__ = (
     "process_permutations",
     "process_pred_as_input",
     "process_random_pos",
+    "specs",
     "evaluate",
     "evaluate_hints",
     "Features",
