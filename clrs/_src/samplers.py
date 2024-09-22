@@ -106,7 +106,9 @@ class Sampler(abc.ABC):
     self._track_max_steps = track_max_steps
 
     if num_samples < 0:
-      logging.warning('Sampling dataset on-the-fly, unlimited samples.')
+      logging.log_first_n(
+          logging.WARNING, 'Sampling dataset on-the-fly, unlimited samples.', 1
+      )
       if track_max_steps:
         # Get an initial estimate of max hint length
         self.max_steps = -1
