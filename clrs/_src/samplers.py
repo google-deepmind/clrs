@@ -19,11 +19,10 @@ import abc
 import collections
 import copy
 import inspect
+import itertools
 import types
-
 from typing import Any, Callable, List, Optional, Tuple
 from absl import logging
-
 from clrs._src import algorithms
 from clrs._src import probing
 from clrs._src import specs
@@ -707,21 +706,106 @@ class SegmentsSampler(Sampler):
     return [xs, ys]
 
 
+def _is_collinear(
+    point_1: np.ndarray,
+    point_2: np.ndarray,
+    point_3: np.ndarray,
+    eps: float,
+) -> bool:
+  """Checks if three points are collinear.
+
+  Args:
+    point_1: The first point.
+    point_2: The second point.
+    point_3: The third point.
+    eps: The tolerance for collinearity.
+
+  Returns:
+    True if the three points are collinear, False otherwise.
+
+  Raises:
+    ValueError: If any of the points is not a 2D vector.
+  """
+  for point in [point_1, point_2, point_3]:
+    if point.shape != (2,):
+      raise ValueError(f'Point {point} is not a 2D vector.')
+
+  # Vectors from p1
+  v_1 = point_2 - point_1
+  v_2 = point_3 - point_1
+
+  cross_val = np.cross(v_1, v_2)
+
+  return bool(abs(cross_val) < eps)
+
+
 class ConvexHullSampler(Sampler):
   """Convex hull sampler of points over a disk of radius r."""
   CAN_TRUNCATE_INPUT_DATA = True
 
-  def _sample_data(self, length: int, origin_x: float = 0.,
-                   origin_y: float = 0., radius: float = 2.):
+  def _sample_data(
+      self,
+      length: int,
+      origin_x: float = 0.0,
+      origin_y: float = 0.0,
+      radius: float = 2.0,
+      collinearity_resampling_attempts: int = 1000,
+      collineararity_eps: float = 1e-12,
+  ):
+    """Samples a convex hull of points over a disk of radius r.
 
-    thetas = self._random_sequence(length=length, low=0.0, high=2.0 * np.pi)
-    rs = radius * np.sqrt(
-        self._random_sequence(length=length, low=0.0, high=1.0))
+    Args:
+      length: The number of points to sample.
+      origin_x: The x-coordinate of the origin of the disk.
+      origin_y: The y-coordinate of the origin of the disk.
+      radius: The radius of the disk.
+      collinearity_resampling_attempts: The number of times to resample if
+        collinear points are found.
+      collineararity_eps: The tolerance for collinearity.
 
-    xs = rs * np.cos(thetas) + origin_x
-    ys = rs * np.sin(thetas) + origin_y
+    Returns:
+      A list of the sampled points.
 
-    return [xs, ys]
+    Raises:
+      RuntimeError: If it could not sample stable points within the specified
+        number of attempts.
+    """
+    for _ in range(collinearity_resampling_attempts):
+      thetas = self._random_sequence(
+          length=length,
+          low=0.0,
+          high=2.0 * np.pi,
+      )
+      rs = radius * np.sqrt(
+          self._random_sequence(length=length, low=0.0, high=1.0)
+      )
+
+      xs = rs * np.cos(thetas) + origin_x
+      ys = rs * np.sin(thetas) + origin_y
+
+      # Sampler._make_batch may do truncation of the input data after
+      # calling _sample_data.
+      # Truncation can lead to collinearity of points, which in turn leads to
+      # numerous correct traces in the Graham scan algorithm. To prevent this,
+      # we check for collinearity and resample if collinear points are found.
+      xs = self._trunc_array(xs)
+      ys = self._trunc_array(ys)
+
+      collinear_found = False
+      points = np.stack([xs, ys], axis=1)
+      for point_1, point_2, point_3 in itertools.combinations(points, 3):
+        if _is_collinear(point_1, point_2, point_3, collineararity_eps):
+          collinear_found = True
+          break
+
+      if collinear_found:
+        continue
+
+      return [xs, ys]
+
+    raise RuntimeError(
+        f'Could not sample {length} stable points within {10000} tries.'
+    )
 
 
 SAMPLERS = {

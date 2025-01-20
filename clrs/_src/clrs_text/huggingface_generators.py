@@ -33,7 +33,7 @@ def clrs_generator(
   Example usage for a finite dataset:
     algos_and_lengths = {"insertion_sort": [16]}
     ds = datasets.Dataset.from_generator(
-        clrs_gen, gen_kwargs={
+        clrs_generator, gen_kwargs={
             "algos_and_lengths": algos_and_lengths,
             "num_samples": 100
         }
@@ -72,7 +72,8 @@ def clrs_generator(
         IterableDataset.from_generator.
     use_hints: Whether hints should be included in the question and answer.
     seed: The random seed for all of the generators.
-    num_decimals_in_float: The number of decimals to truncate floats to.
+    num_decimals_in_float: The number of decimals to truncate floats to. Defaults
+        to 3.
 
   Yields:
     A dictionary with the following keys:

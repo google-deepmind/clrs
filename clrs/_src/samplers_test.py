@@ -471,6 +471,51 @@ class AuxiliaryFunctionsTest(parameterized.TestCase):
   def test_is_float_array(self, input_data, expected_output):
     self.assertEqual(samplers._is_float_array(input_data), expected_output)
 
+  @parameterized.named_parameters(
+      dict(
+          testcase_name='collinear_points',
+          point_1=np.array([1, 1]),
+          point_2=np.array([2, 2]),
+          point_3=np.array([3, 3]),
+          eps=1e-6,
+          expected_output=True,
+      ),
+      dict(
+          testcase_name='non_collinear_points',
+          point_1=np.array([1, 1]),
+          point_2=np.array([2, 2]),
+          point_3=np.array([1, 2]),
+          eps=1e-6,
+          expected_output=False,
+      ),
+      dict(
+          testcase_name='points_within_tolerance',
+          point_1=np.array([1, 1]),
+          point_2=np.array([2, 2]),
+          point_3=np.array([2.00, 1.9999]),
+          eps=1e-4,
+          expected_output=True,
+      ),
+      dict(
+          testcase_name='points_outside_tolerance',
+          point_1=np.array([1, 1]),
+          point_2=np.array([2, 2]),
+          point_3=np.array([2, 1.9998]),
+          eps=1e-4,
+          expected_output=False,
+      ),
+  )
+  def test_is_collinear(self, point_1, point_2, point_3, eps, expected_output):
+    self.assertEqual(
+        samplers._is_collinear(point_1, point_2, point_3, eps), expected_output
+    )
+
+  def test_is_collinear_raise_error(self):
+    with self.assertRaises(ValueError):
+      samplers._is_collinear(
+          np.array([1, 1, 3]), np.array([2,]), np.array([3, 3]), eps=1e-6,
+      )
+
 
 class ProcessRandomPosTest(parameterized.TestCase):
 
