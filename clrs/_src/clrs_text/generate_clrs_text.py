@@ -147,6 +147,11 @@ _SEEDS = flags.DEFINE_list(
     ' empty, the default seeds will be used for `train` and `val`'
     ' split_name.',
 )
+_NUM_DECIMALS_IN_FLOAT = flags.DEFINE_integer(
+    'num_decimals_in_float',
+    None,
+    'The number of decimals in float.',
+)
 
 
 CLRS_SAMPLE_SPEC = {
@@ -200,6 +205,7 @@ def get_dataset_config(
     number_of_samples: int,
     use_hints: bool,
     seed: int,
+    num_decimals_in_float: int | None,
 ) -> config_dict.ConfigDict:
   """Returns the dataset config.
 
@@ -209,6 +215,7 @@ def get_dataset_config(
     number_of_samples: The number of samples to generate.
     use_hints: Whether to use hints.
     seed: The seed to use.
+    num_decimals_in_float: The number of decimals in float.
 
   Returns:
     A config_dict.ConfigDict containing the dataset config.
@@ -220,6 +227,7 @@ def get_dataset_config(
   config.number_of_samples = number_of_samples
   config.use_hints = use_hints
   config.seed = seed
+  config.num_decimals_in_float = num_decimals_in_float
 
   config.lock()
   return config
@@ -281,6 +289,7 @@ def generate_clrs_algo_dataset(
       num_samples=-1,  # data is generated on the fly.
       length=config.length,
       track_max_steps=False,
+      truncate_decimals=config.num_decimals_in_float,
   )
 
   generator_fn = functools.partial(
@@ -417,6 +426,7 @@ def main(_: Sequence[str]) -> None:
           number_of_samples=number_of_samples,
           use_hints=_USE_HINTS.value,
           seed=seed,
+          num_decimals_in_float=_NUM_DECIMALS_IN_FLOAT.value,
       )
       dataset = generate_clrs_algo_dataset(config)
       samples.extend(

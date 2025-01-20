@@ -26,6 +26,7 @@ def clrs_generator(
     num_samples: Optional[int] = None,
     use_hints: bool = False,
     seed: int = 0,
+    num_decimals_in_float: int = 3,
 ):
   """Huggingface compatible generator function for CLRS-text dataset.
 
@@ -71,6 +72,7 @@ def clrs_generator(
         IterableDataset.from_generator.
     use_hints: Whether hints should be included in the question and answer.
     seed: The random seed for all of the generators.
+    num_decimals_in_float: The number of decimals to truncate floats to.
 
   Yields:
     A dictionary with the following keys:
@@ -93,6 +95,7 @@ def clrs_generator(
           length=length,
           track_max_steps=False,
           use_padding=False,
+          truncate_decimals=num_decimals_in_float,
       )
       clrs_samplers.append((sampler, algo_name, length))
 

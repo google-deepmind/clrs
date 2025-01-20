@@ -15,4 +15,6 @@
 """The CLRS Text Algorithmic Reasoning Benchmark."""
 
 from clrs._src.clrs_text import clrs_utils
+from clrs._src.clrs_text import generate_clrs_text
 from clrs._src.clrs_text import huggingface_generators
+

@@ -485,7 +485,7 @@ def _convert_node_features_to_str(
       )
 
       return _bracket(
-          SEQUENCE_SEPARATOR.join([f'{scalar:.3g}' for scalar in sorted_values])
+          SEQUENCE_SEPARATOR.join([str(scalar) for scalar in sorted_values])
       )
 
     case specs.Type.MASK_ONE:
@@ -493,7 +493,7 @@ def _convert_node_features_to_str(
       return f'{index}'
 
     case specs.Type.SCALAR:
-      return _bracket(SEQUENCE_SEPARATOR.join([f'{a:.3g}' for a in x]))
+      return _bracket(SEQUENCE_SEPARATOR.join([str(a) for a in x]))
 
     case specs.Type.MASK | specs.Type.POINTER | specs.Type.CATEGORICAL:
       if spec_type == specs.Type.CATEGORICAL:
@@ -516,7 +516,7 @@ def _convert_graph_features_to_str(
   """Converts graph features into string."""
   match spec_type:
     case specs.Type.SCALAR:
-      return f'{x:.3f}'
+      return str(x)
 
     case specs.Type.CATEGORICAL:
       categories = np.argmax(x, axis=-1)
@@ -567,7 +567,7 @@ def _convert_edge_features_to_str(
         )
 
       case specs.Type.SCALAR:
-        row_to_str = lambda r: _bracket(' '.join([f'{a:.3g}' for a in r]))
+        row_to_str = lambda r: _bracket(' '.join([str(a) for a in r]))
         return _bracket(DEFAULT_SEPARATOR.join([row_to_str(r) for r in x]))
 
   raise KeyError(f'Feature type not supported in spec {spec[spec_name]}')

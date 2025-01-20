@@ -12,7 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Tests for clrs._src.clrs_text.huggingface_generators."""
+"""Tests for clrs._src.clrs_text.huggingface_generators.
+
+This module contains tests for the huggingface_generators module.
+"""
 
 import functools
 
@@ -117,8 +120,11 @@ class TestCLRSGenerator(parameterized.TestCase):
     self.assertSetEqual(sample_lengths, set(lengths))
     self.assertSetEqual(sample_algorithms, set(algos_and_lengths.keys()))
 
-  @parameterized.product(num_samples=[10, 50, 100])
-  def test_dataset_size(self, num_samples):
+  @parameterized.product(
+      num_samples=[10, 50, 100],
+      num_decimals_in_float=[None, 3],
+  )
+  def test_dataset_size(self, num_samples, num_decimals_in_float):
     """Test that the dataset size is correct."""
     clrs_ds = datasets.Dataset.from_generator(
         huggingface_generators.clrs_generator,
@@ -129,6 +135,7 @@ class TestCLRSGenerator(parameterized.TestCase):
             },
             "num_samples": num_samples,
             "seed": 0,
+            "num_decimals_in_float": num_decimals_in_float,
         },
         streaming=True,
     )

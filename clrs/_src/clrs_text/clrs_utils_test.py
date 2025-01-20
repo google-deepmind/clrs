@@ -12,7 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""Tests for clrs.src_.clrs_text.clrs_utils."""
+"""Tests for clrs.src_.clrs_text.clrs_utils.
+
+Tests formatting CLRS examples and converting CLRS predecessors to order.
+"""
 
 
 from absl.testing import absltest
@@ -38,6 +41,7 @@ class TestFormatCLRSExamples(parameterized.TestCase):
         length=16,
         track_max_steps=False,
         use_padding=False,
+        truncate_decimals=3,
     )
 
     for _ in range(100):

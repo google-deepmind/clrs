@@ -321,26 +321,26 @@ class AuxiliaryFunctionsTest(parameterized.TestCase):
       ),
       dict(
           testcase_name='mixed_4_decimals',
-          input_data=np.array([1, 2, 3.14159]),
-          expected_output=np.array([1, 2, 3.1415]),
+          input_data=np.array([1.0, 2.0, 3.14159]),
+          expected_output=np.array([1.0, 2.0, 3.1415]),
           truncate_decimals=4,
       ),
       dict(
           testcase_name='list_mixed_4_decimals',
-          input_data=[np.array([1, 2, 3.14159])],
+          input_data=[np.array([1.0, 2.0, 3.14159])],
           expected_output=[np.array([1.0, 2.0, 3.1415])],
           truncate_decimals=4,
       ),
       dict(
           testcase_name='with_strings_4_decimals_np_array',
-          input_data=np.array([1, 2, 3.14159, 'test']),
-          expected_output=np.array([1, 2, 3.14159, 'test']),
+          input_data=np.array([1.0, 2.0, 3.14159, 'test']),
+          expected_output=np.array([1.0, 2.0, 3.14159, 'test']),
           truncate_decimals=4,
       ),
       dict(
           testcase_name='mixed_data',
-          input_data=[np.array([1, 2, 3.14159]), 'test'],
-          expected_output=[np.array([1, 2, 3.1415]), 'test'],
+          input_data=[np.array([1.0, 2.0, 3.14159]), 'test'],
+          expected_output=[np.array([1.0, 2.0, 3.1415]), 'test'],
           truncate_decimals=4,
       ),
   )
