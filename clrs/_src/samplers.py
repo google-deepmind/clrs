@@ -706,6 +706,19 @@ class SegmentsSampler(Sampler):
     return [xs, ys]
 
 
+def _cross2d(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+  """Computes the cross product of two 2D vectors.
+
+  Args:
+    x: The first 2D vector.
+    y: The second 2D vector.
+
+  Returns:
+    The cross product of the two vectors.
+  """
+  return x[..., 0] * y[..., 1] - x[..., 1] * y[..., 0]
+
+
 def _is_collinear(
     point_1: np.ndarray,
     point_2: np.ndarray,
@@ -734,7 +747,7 @@ def _is_collinear(
   v_1 = point_2 - point_1
   v_2 = point_3 - point_1
 
-  cross_val = np.cross(v_1, v_2)
+  cross_val = _cross2d(v_1, v_2)
 
   return bool(abs(cross_val) < eps)
 
