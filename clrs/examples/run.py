@@ -139,7 +139,7 @@ PRED_AS_INPUT_ALGOS = [
 
 def unpack(v):
   try:
-    return v.item()  # DeviceArray
+    return v.item()  # DeviceArray  # pytype: disable=attribute-error
   except (AttributeError, ValueError):
     return v
 
