@@ -317,20 +317,24 @@ def create_samplers(
 
   algorithms = algorithms or FLAGS.algorithms
   for algo_idx, algorithm in enumerate(algorithms):
-    # Make full dataset pipeline run on CPU (including prefetching).
-    with tf.device('/cpu:0'):
+    # Set the training lengths for the current algorithm.
+    current_algo_train_lengths = train_lengths
 
+     # Make full dataset pipeline run on CPU (including prefetching).
+    with tf.device('/cpu:0'):
       if algorithm in ['naive_string_matcher', 'kmp_matcher']:
         # Fixed haystack + needle; variability will be in needle
         # Still, for chunked training, we maintain as many samplers
         # as train lengths, since, for each length there is a separate state,
         # and we must keep the 1:1 relationship between states and samplers.
-        max_length = max(train_lengths)
+        max_length = max(current_algo_train_lengths)
         if max_length > 0:  # if < 0, we are using the benchmark data
           max_length = (max_length * 5) // 4
-        train_lengths = [max_length]
+        current_algo_train_lengths = [max_length]
         if FLAGS.chunked_training:
-          train_lengths = train_lengths * len(train_lengths)
+          current_algo_train_lengths = current_algo_train_lengths * len(
+              current_algo_train_lengths
+          )
 
       logging.info('Creating samplers for algo %s', algorithm)
 
@@ -353,26 +357,30 @@ def create_samplers(
           chunk_length=FLAGS.chunk_length,
           )
 
-      train_args = dict(sizes=train_lengths,
-                        split='train',
-                        batch_size=train_batch_size,
-                        multiplier=-1,
-                        randomize_pos=FLAGS.random_pos,
-                        chunked=FLAGS.chunked_training,
-                        sampler_kwargs=sampler_kwargs,
-                        **common_sampler_args)
-      train_sampler, _, spec = make_multi_sampler(**train_args)
+      train_args = dict(
+          sizes=current_algo_train_lengths,
+          split='train',
+          batch_size=train_batch_size,
+          multiplier=-1,
+          randomize_pos=FLAGS.random_pos,
+          chunked=FLAGS.chunked_training,
+          sampler_kwargs=sampler_kwargs,
+          **common_sampler_args,
+      )
+      train_sampler, _, _ = make_multi_sampler(**train_args)
 
       mult = clrs.CLRS_30_ALGS_SETTINGS[algorithm]['num_samples_multiplier']
-      val_args = dict(sizes=val_lengths or [np.amax(train_lengths)],
-                      split='val',
-                      batch_size=val_batch_size,
-                      multiplier=2 * mult,
-                      randomize_pos=FLAGS.random_pos,
-                      chunked=False,
-                      sampler_kwargs=sampler_kwargs,
-                      **common_sampler_args)
-      val_sampler, val_samples, spec = make_multi_sampler(**val_args)
+      val_args = dict(
+          sizes=val_lengths or [np.amax(current_algo_train_lengths)],
+          split='val',
+          batch_size=val_batch_size,
+          multiplier=2 * mult,
+          randomize_pos=FLAGS.random_pos,
+          chunked=False,
+          sampler_kwargs=sampler_kwargs,
+          **common_sampler_args,
+      )
+      val_sampler, val_samples, _ = make_multi_sampler(**val_args)
 
       test_args = dict(sizes=test_lengths or [-1],
                        split='test',
