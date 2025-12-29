@@ -85,6 +85,7 @@ class Net(hk.Module):
       hint_repred_mode='soft',
       nb_dims=None,
       nb_msg_passing_steps=1,
+      debug=False,
       name: str = 'net',
   ):
     """Constructs a `Net`."""
@@ -102,6 +103,7 @@ class Net(hk.Module):
     self.use_lstm = use_lstm
     self.encoder_init = encoder_init
     self.nb_msg_passing_steps = nb_msg_passing_steps
+    self.debug = debug
 
   def _msg_passing_step(self,
                         mp_state: _MessagePassingScanState,
@@ -186,7 +188,7 @@ class Net(hk.Module):
     accum_mp_state = _MessagePassingScanState(  # pytype: disable=wrong-arg-types  # numpy-scalars
         hint_preds=hint_preds if return_hints else None,
         output_preds=output_preds if return_all_outputs else None,
-        hiddens=None, lstm_state=None)
+        hiddens=hiddens if self.debug else None, lstm_state=None)
 
     # Complying to jax.scan, the first returned value is the state we carry over
     # the second value is the output that will be stacked over steps.
@@ -317,6 +319,10 @@ class Net(hk.Module):
     else:
       output_preds = output_mp_state.output_preds
     hint_preds = invert(accum_mp_state.hint_preds)
+
+    if self.debug:
+      hiddens = jnp.stack([v for v in accum_mp_state.hiddens])
+      return output_preds, hint_preds, hiddens
 
     return output_preds, hint_preds
 
@@ -639,8 +645,16 @@ class NetChunked(Net):
               lambda x, b=batch_size, n=nb_nodes: jnp.reshape(x, [b, n, -1]),
               lstm_state)
           mp_state.lstm_state = lstm_state
-        mp_state.inputs = jax.tree_util.tree_map(lambda x: x[0], inputs)
-        mp_state.hints = jax.tree_util.tree_map(lambda x: x[0], hints)
+        # Avoid degraded performance under the new jax.pmap. See
+        # https://docs.jax.dev/en/latest/migrate_pmap.html#int-indexing-into-sharded-arrays.
+        if jax.config.jax_pmap_shmap_merge:
+          mp_state.inputs = jax.tree_util.tree_map(
+              lambda x: x.addressable_shards[0].data.squeeze(0), inputs)
+          mp_state.hints = jax.tree_util.tree_map(
+              lambda x: x.addressable_shards[0].data.squeeze(0), hints)
+        else:
+          mp_state.inputs = jax.tree_util.tree_map(lambda x: x[0], inputs)
+          mp_state.hints = jax.tree_util.tree_map(lambda x: x[0], hints)
         mp_state.is_first = jnp.zeros(batch_size, dtype=int)
         mp_state.hiddens = jnp.zeros((batch_size, nb_nodes, self.hidden_dim))
         next_is_first = jnp.ones(batch_size, dtype=int)
