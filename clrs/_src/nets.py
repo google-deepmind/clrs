@@ -645,8 +645,16 @@ class NetChunked(Net):
               lambda x, b=batch_size, n=nb_nodes: jnp.reshape(x, [b, n, -1]),
               lstm_state)
           mp_state.lstm_state = lstm_state
-        mp_state.inputs = jax.tree_util.tree_map(lambda x: x[0], inputs)
-        mp_state.hints = jax.tree_util.tree_map(lambda x: x[0], hints)
+        # Avoid degraded performance under the new jax.pmap. See
+        # https://docs.jax.dev/en/latest/migrate_pmap.html#int-indexing-into-sharded-arrays.
+        if jax.config.jax_pmap_shmap_merge:
+          mp_state.inputs = jax.tree_util.tree_map(
+              lambda x: x.addressable_shards[0].data.squeeze(0), inputs)
+          mp_state.hints = jax.tree_util.tree_map(
+              lambda x: x.addressable_shards[0].data.squeeze(0), hints)
+        else:
+          mp_state.inputs = jax.tree_util.tree_map(lambda x: x[0], inputs)
+          mp_state.hints = jax.tree_util.tree_map(lambda x: x[0], hints)
         mp_state.is_first = jnp.zeros(batch_size, dtype=int)
         mp_state.hiddens = jnp.zeros((batch_size, nb_nodes, self.hidden_dim))
         next_is_first = jnp.ones(batch_size, dtype=int)
