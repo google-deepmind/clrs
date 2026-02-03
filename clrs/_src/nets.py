@@ -85,6 +85,7 @@ class Net(hk.Module):
       hint_repred_mode='soft',
       nb_dims=None,
       nb_msg_passing_steps=1,
+      debug=False,
       name: str = 'net',
   ):
     """Constructs a `Net`."""
@@ -102,6 +103,7 @@ class Net(hk.Module):
     self.use_lstm = use_lstm
     self.encoder_init = encoder_init
     self.nb_msg_passing_steps = nb_msg_passing_steps
+    self.debug = debug
 
   def _msg_passing_step(self,
                         mp_state: _MessagePassingScanState,
@@ -186,7 +188,7 @@ class Net(hk.Module):
     accum_mp_state = _MessagePassingScanState(  # pytype: disable=wrong-arg-types  # numpy-scalars
         hint_preds=hint_preds if return_hints else None,
         output_preds=output_preds if return_all_outputs else None,
-        hiddens=None, lstm_state=None)
+        hiddens=hiddens if self.debug else None, lstm_state=None)
 
     # Complying to jax.scan, the first returned value is the state we carry over
     # the second value is the output that will be stacked over steps.
@@ -317,6 +319,10 @@ class Net(hk.Module):
     else:
       output_preds = output_mp_state.output_preds
     hint_preds = invert(accum_mp_state.hint_preds)
+
+    if self.debug:
+      hiddens = jnp.stack([v for v in accum_mp_state.hiddens])
+      return output_preds, hint_preds, hiddens
 
     return output_preds, hint_preds
 
@@ -639,8 +645,44 @@ class NetChunked(Net):
               lambda x, b=batch_size, n=nb_nodes: jnp.reshape(x, [b, n, -1]),
               lstm_state)
           mp_state.lstm_state = lstm_state
-        mp_state.inputs = jax.tree_util.tree_map(lambda x: x[0], inputs)
-        mp_state.hints = jax.tree_util.tree_map(lambda x: x[0], hints)
+        # Avoid degraded performance under the new jax.pmap. See
+        # https://docs.jax.dev/en/latest/migrate_pmap.html#int-indexing-into-sharded-arrays.
+        def _get_first(x):
+          # Handle non-JAX arrays (e.g., numpy arrays) by direct indexing.
+          if not isinstance(x, jax.Array):
+            return x[0]
+          # Scalar arrays have no first element to extract; return as-is.
+          if x.ndim == 0:
+            return x
+          # Arrays without sharding or with SingleDeviceSharding are local;
+          # return them unchanged to avoid unnecessary indexing overhead.
+          if not hasattr(x, 'sharding') or isinstance(
+              x.sharding, jax.sharding.SingleDeviceSharding
+          ):
+            return x
+          # Under the new jax.pmap (jax_pmap_shmap_merge), integer indexing
+          # into sharded arrays triggers expensive cross-device copies. Handle
+          # specially to avoid this performance degradation.
+          if jax.config.jax_pmap_shmap_merge:
+            # Single-device case: no cross-device copy, safe to index directly.
+            if len(jax.local_devices()) == 1:
+              return x[0]
+            # Fully-replicated arrays have identical data on all shards;
+            # extract from the first addressable shard to avoid copies.
+            if x.sharding.is_fully_replicated:
+              return x.addressable_shards[0].data
+            # For non-replicated sharded arrays, get data from the first shard.
+            # If the shard has a leading dimension of 1 (from the pmap batch
+            # axis), squeeze it out to match the expected shape.
+            shard_data = x.addressable_shards[0].data
+            if shard_data.shape and shard_data.shape[0] == 1:
+              return shard_data.squeeze(0)
+            return shard_data
+          # Legacy pmap path: direct indexing is safe and efficient.
+          return x[0]
+
+        mp_state.inputs = jax.tree_util.tree_map(_get_first, inputs)
+        mp_state.hints = jax.tree_util.tree_map(_get_first, hints)
         mp_state.is_first = jnp.zeros(batch_size, dtype=int)
         mp_state.hiddens = jnp.zeros((batch_size, nb_nodes, self.hidden_dim))
         next_is_first = jnp.ones(batch_size, dtype=int)

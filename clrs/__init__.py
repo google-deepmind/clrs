@@ -16,21 +16,30 @@
 """The CLRS Algorithmic Reasoning Benchmark."""
 
 from clrs import models
+
 from clrs._src import algorithms
+from clrs._src import clrs_text
 from clrs._src import decoders
 from clrs._src import processors
+from clrs._src import specs
+
 from clrs._src.dataset import chunkify
 from clrs._src.dataset import CLRSDataset
 from clrs._src.dataset import create_chunked_dataset
 from clrs._src.dataset import create_dataset
 from clrs._src.dataset import get_clrs_folder
 from clrs._src.dataset import get_dataset_gcp_url
+
 from clrs._src.evaluation import evaluate
 from clrs._src.evaluation import evaluate_hints
+
 from clrs._src.model import Model
+
 from clrs._src.probing import DataPoint
 from clrs._src.probing import predecessor_to_cyclic_predecessor_and_first
+
 from clrs._src.processors import get_processor_factory
+
 from clrs._src.samplers import build_sampler
 from clrs._src.samplers import CLRS30
 from clrs._src.samplers import Features
@@ -40,6 +49,7 @@ from clrs._src.samplers import process_pred_as_input
 from clrs._src.samplers import process_random_pos
 from clrs._src.samplers import Sampler
 from clrs._src.samplers import Trajectory
+
 from clrs._src.specs import ALGO_IDX_INPUT_NAME
 from clrs._src.specs import CLRS_30_ALGS_SETTINGS
 from clrs._src.specs import Location
@@ -49,7 +59,7 @@ from clrs._src.specs import SPECS
 from clrs._src.specs import Stage
 from clrs._src.specs import Type
 
-__version__ = "1.0.0"
+__version__ = "2.0.3"
 
 __all__ = (
     "ALGO_IDX_INPUT_NAME",
@@ -59,6 +69,7 @@ __all__ = (
     "CLRS_30_ALGS_SETTINGS",
     "create_chunked_dataset",
     "create_dataset",
+    "clrs_text",
     "get_clrs_folder",
     "get_dataset_gcp_url",
     "get_processor_factory",
@@ -67,6 +78,7 @@ __all__ = (
     "process_permutations",
     "process_pred_as_input",
     "process_random_pos",
+    "specs",
     "evaluate",
     "evaluate_hints",
     "Features",

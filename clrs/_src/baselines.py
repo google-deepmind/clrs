@@ -57,6 +57,11 @@ _OutputClass = specs.OutputClass
 def _maybe_pick_first_pmapped(tree):
   if jax.local_device_count() == 1:
     return tree
+  # Avoid degraded performance under the new jax.pmap. See
+  # https://docs.jax.dev/en/latest/migrate_pmap.html#int-indexing-into-sharded-arrays.
+  if jax.config.jax_pmap_shmap_merge:
+    return jax.tree_util.tree_map(
+        lambda x: x.addressable_shards[0].data.squeeze(0), tree)
   return jax.tree_util.tree_map(lambda x: x[0], tree)
 
 
@@ -155,6 +160,7 @@ class BaselineModel(model.Model):
       hint_repred_mode: str = 'soft',
       name: str = 'base_model',
       nb_msg_passing_steps: int = 1,
+      debug: bool = False,
   ):
     """Constructor for BaselineModel.
 
@@ -199,6 +205,7 @@ class BaselineModel(model.Model):
           - 'hard_on_eval', which is soft for training and hard for evaluation.
       name: Model name.
       nb_msg_passing_steps: Number of message passing steps per hint.
+      debug: If True, the model run in debug mode, outputting all hidden state.
 
     Raises:
       ValueError: if `encode_hints=True` and `decode_hints=False`.
@@ -223,6 +230,7 @@ class BaselineModel(model.Model):
       self.opt = optax.adam(learning_rate)
 
     self.nb_msg_passing_steps = nb_msg_passing_steps
+    self.debug = debug
 
     self.nb_dims = []
     if isinstance(dummy_trajectory, _Feedback):
@@ -253,7 +261,8 @@ class BaselineModel(model.Model):
                       processor_factory, use_lstm, encoder_init,
                       dropout_prob, hint_teacher_forcing,
                       hint_repred_mode,
-                      self.nb_dims, self.nb_msg_passing_steps)(*args, **kwargs)
+                      self.nb_dims, self.nb_msg_passing_steps,
+                      self.debug)(*args, **kwargs)
 
     self.net_fn = hk.transform(_use_net)
     pmap_args = dict(axis_name='batch', devices=jax.local_devices())
@@ -324,18 +333,25 @@ class BaselineModel(model.Model):
   def _predict(self, params, rng_key: hk.PRNGSequence, features: _Features,
                algorithm_index: int, return_hints: bool,
                return_all_outputs: bool):
-    outs, hint_preds = self.net_fn.apply(
+    net_outputs = self.net_fn.apply(
         params, rng_key, [features],
         repred=True, algorithm_index=algorithm_index,
         return_hints=return_hints,
         return_all_outputs=return_all_outputs)
+    if self.debug:
+      outs, hint_preds, hidden_states = net_outputs
+    else:
+      outs, hint_preds = net_outputs
     outs = decoders.postprocess(self._spec[algorithm_index],
                                 outs,
                                 sinkhorn_temperature=0.1,
                                 sinkhorn_steps=50,
                                 hard=True,
                                 )
-    return outs, hint_preds
+    if self.debug:
+      return outs, hint_preds, hidden_states
+    else:
+      return outs, hint_preds
 
   def compute_grad(
       self,
@@ -394,12 +410,16 @@ class BaselineModel(model.Model):
 
   def _loss(self, params, rng_key, feedback, algorithm_index):
     """Calculates model loss f(feedback; params)."""
-    output_preds, hint_preds = self.net_fn.apply(
+    outputs = self.net_fn.apply(
         params, rng_key, [feedback.features],
         repred=False,
         algorithm_index=algorithm_index,
         return_hints=True,
         return_all_outputs=False)
+    if self.debug:
+      output_preds, hint_preds, _ = outputs
+    else:
+      output_preds, hint_preds = outputs
 
     nb_nodes = _nb_nodes(feedback, is_chunked=False)
     lengths = feedback.features.lengths
@@ -766,9 +786,19 @@ def filter_null_grads(grads, opt, opt_state, opt_state_skeleton, algo_idx):
     masked_grads = grads
   else:
     masked_grads = {k: _keep_in_algo(k, v) for k, v in grads.items()}
-  flat_grads, treedef = jax.tree_util.tree_flatten(masked_grads)
+
+  flat_grads_with_none, treedef = jax.tree_util.tree_flatten(
+      masked_grads, is_leaf=lambda x: x is None
+  )
+  null_mask = [g is None for g in flat_grads_with_none]
+  flat_grads_all, _ = jax.tree_util.tree_flatten(grads)
+  flat_grads = [
+      flat_grads_all[i] if null_mask[i] else flat_grads_with_none[i]
+      for i in range(len(flat_grads_with_none))
+  ]
+
   flat_opt_state = jax.tree_util.tree_map(
-      lambda _, x: x  # pylint:disable=g-long-lambda
+      lambda _, x: x
       if isinstance(x, (np.ndarray, jax.Array))
       else treedef.flatten_up_to(x),
       opt_state_skeleton,
@@ -778,17 +808,38 @@ def filter_null_grads(grads, opt, opt_state, opt_state_skeleton, algo_idx):
   # Compute updates only for the params with gradient.
   flat_updates, flat_opt_state = opt_update(opt, flat_grads, flat_opt_state)
 
+  flat_updates = [
+      None if null_mask[i] else flat_updates[i]
+      for i in range(len(flat_updates))
+  ]
+  flat_opt_state = jax.tree_util.tree_map(
+      lambda x: x
+      if isinstance(x, (np.ndarray, jax.Array))
+      else [None if null_mask[i] else x[i] for i in range(len(x))],
+      flat_opt_state,
+      is_leaf=lambda x: isinstance(x, (np.ndarray, jax.Array)),
+  )
+
   def unflatten(flat, original):
     """Restore tree structure, filling missing (None) leaves with original."""
+
     if isinstance(flat, (np.ndarray, jax.Array)):
       return flat
-    return jax.tree_util.tree_map(lambda x, y: x if y is None else y, original,
-                                  treedef.unflatten(flat))
+    return jax.tree_util.tree_map(
+        lambda x, y: x if y is None else y,
+        original,
+        treedef.unflatten(flat),
+        is_leaf=lambda x: x is None,
+    )
 
   # Restore the state and updates tree structure.
-  new_opt_state = jax.tree_util.tree_map(lambda _, x, y: unflatten(x, y),
-                                         opt_state_skeleton, flat_opt_state,
-                                         opt_state)
-  updates = unflatten(flat_updates,
-                      jax.tree_util.tree_map(lambda x: 0., grads))
+  new_opt_state = jax.tree_util.tree_map(
+      lambda _, x, y: unflatten(x, y),
+      opt_state_skeleton,
+      flat_opt_state,
+      opt_state,
+  )
+  updates = unflatten(
+      flat_updates, jax.tree_util.tree_map(lambda x: 0.0, grads)
+  )
   return updates, new_opt_state
