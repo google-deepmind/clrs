@@ -17,8 +17,6 @@
 This module contains tests for the huggingface_generators module.
 """
 
-import functools
-
 from absl.testing import absltest
 from absl.testing import parameterized
 
@@ -26,8 +24,6 @@ from clrs._src.clrs_text import clrs_utils
 from clrs._src.clrs_text import huggingface_generators
 
 import clrs._src.specs as clrs_spec
-
-import datasets
 
 
 class TestCLRSGenerator(parameterized.TestCase):
@@ -37,37 +33,24 @@ class TestCLRSGenerator(parameterized.TestCase):
       algo_name=list(clrs_spec.CLRS_30_ALGS_SETTINGS.keys()),
       lengths=[[4, 8]],
       use_hints=[True, False],
-      dataset_from_generator_and_num_samples=[
-          (
-              functools.partial(
-                  datasets.Dataset.from_generator,
-                  streaming=True,
-              ),
-              10,
-          ),
-          (datasets.IterableDataset.from_generator, None),
-      ],
+      num_samples=[10, None],
   )
   def test_generator_output_format(
       self,
       algo_name,
       lengths,
       use_hints,
-      dataset_from_generator_and_num_samples,
+      num_samples,
   ):
     """Test that the output format of the generator is correct."""
-    dataset_from_generator, num_samples = dataset_from_generator_and_num_samples
-    clrs_ds = dataset_from_generator(
-        huggingface_generators.clrs_generator,
-        gen_kwargs={
-            "algos_and_lengths": {algo_name: lengths},
-            "num_samples": num_samples,
-            "use_hints": use_hints,
-            "seed": 0,
-        },
+    gen = huggingface_generators.clrs_generator(
+        algos_and_lengths={algo_name: lengths},
+        num_samples=num_samples,
+        use_hints=use_hints,
+        seed=0,
     )
     # only test the first 10 samples.
-    for _, sample in zip(range(10), clrs_ds):
+    for _, sample in zip(range(10), gen):
       if use_hints and algo_name in clrs_utils.CLRS_TASKS_WITH_HINTS:
         # question should have schema for trace if hints are used.
         q_regex_hints = (
@@ -97,19 +80,15 @@ class TestCLRSGenerator(parameterized.TestCase):
     algos_and_lengths = {
         algo_name: lengths for algo_name in clrs_spec.CLRS_30_ALGS_SETTINGS
     }
-    clrs_ds = datasets.Dataset.from_generator(
-        huggingface_generators.clrs_generator,
-        gen_kwargs={
-            "algos_and_lengths": algos_and_lengths,
-            "num_samples": 200,
-            "use_hints": use_hints,
-            "seed": 0,
-        },
-        streaming=True,
+    gen = huggingface_generators.clrs_generator(
+        algos_and_lengths=algos_and_lengths,
+        num_samples=200,
+        use_hints=use_hints,
+        seed=0,
     )
     sample_lengths = set()
     sample_algorithms = set()
-    for sample in clrs_ds:
+    for sample in gen:
       sample_lengths.add(sample["length"])
       sample_algorithms.add(sample["algo_name"])
 
@@ -126,20 +105,16 @@ class TestCLRSGenerator(parameterized.TestCase):
   )
   def test_dataset_size(self, num_samples, num_decimals_in_float):
     """Test that the dataset size is correct."""
-    clrs_ds = datasets.Dataset.from_generator(
-        huggingface_generators.clrs_generator,
-        gen_kwargs={
-            "algos_and_lengths": {
-                "insertion_sort": [16],
-                "bfs": [8, 10],
-            },
-            "num_samples": num_samples,
-            "seed": 0,
-            "num_decimals_in_float": num_decimals_in_float,
+    gen = huggingface_generators.clrs_generator(
+        algos_and_lengths={
+            "insertion_sort": [16],
+            "bfs": [8, 10],
         },
-        streaming=True,
+        num_samples=num_samples,
+        seed=0,
+        num_decimals_in_float=num_decimals_in_float,
     )
-    ds_iterator = iter(clrs_ds)
+    ds_iterator = iter(gen)
     for _ in range(num_samples):
       next(ds_iterator)
     self.assertRaises(StopIteration, next, ds_iterator)
