@@ -189,13 +189,13 @@ def _convert_to_basic_types(
     The converted sample.
   """
   vals, sample_tree = jax.tree.flatten(sample)
-  converters, converters_tree = jax.tree.flatten(converters)
+  converters, converters_tree = jax.tree.flatten(converters)  # pyrefly: ignore[bad-assignment]
   if sample_tree != converters_tree:
     raise ValueError(
         f'Sample tree {sample_tree} and converters tree {converters_tree} '
         'do not match.'
     )
-  converted_vals = [converter(val) for val, converter in zip(vals, converters)]
+  converted_vals = [converter(val) for val, converter in zip(vals, converters)]  # pyrefly: ignore[not-callable]
   return jax.tree.unflatten(sample_tree, converted_vals)
 
 
@@ -303,7 +303,7 @@ def generate_clrs_algo_dataset(
   )
 
   dataset = tf.data.Dataset.from_generator(
-      generator_fn,
+      generator_fn,  # pyrefly: ignore[bad-argument-type]
       output_signature=CLRS_SAMPLE_SPEC,
   )
 
@@ -326,7 +326,7 @@ def _update_generation_params(
   Returns:
     The updated algos and lengths, number of samples, and seeds.
   """
-  seeds = [int(seed) for seed in seeds]
+  seeds = [int(seed) for seed in seeds]  # pyrefly: ignore[bad-assignment]
 
   if not algos_and_lengths:
     logging.info(
@@ -353,9 +353,9 @@ def _update_generation_params(
       )
       match _SPLIT_NAME.value:
         case 'train':
-          seeds = _DEFAULT_TRAIN_SEEDS
+          seeds = _DEFAULT_TRAIN_SEEDS  # pyrefly: ignore[bad-assignment]
         case 'val':
-          seeds = _DEFAULT_VAL_SEEDS
+          seeds = _DEFAULT_VAL_SEEDS  # pyrefly: ignore[bad-assignment]
         case _:
           raise ValueError(
               f'Unsupported split name {_SPLIT_NAME.value} for empty'
@@ -388,7 +388,7 @@ def _update_generation_params(
       raise ValueError(
           'Seeds must be set when `algos_and_lengths` is not None.'
       )
-  return algos_and_lengths, number_of_samples, seeds
+  return algos_and_lengths, number_of_samples, seeds  # pyrefly: ignore[bad-return]
 
 
 def main(_: Sequence[str]) -> None:
@@ -431,7 +431,7 @@ def main(_: Sequence[str]) -> None:
       dataset = generate_clrs_algo_dataset(config)
       samples.extend(
           [
-              _convert_to_basic_types(sample, CLRS_TF_TENSORS_CONVERTERS)
+              _convert_to_basic_types(sample, CLRS_TF_TENSORS_CONVERTERS)  # pyrefly: ignore[bad-argument-type]
               for sample in dataset
           ],
       )

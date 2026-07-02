@@ -106,7 +106,7 @@ def clrs_generator(
   infinite_loop = num_samples is None
   sample_count = 0
 
-  while infinite_loop or sample_count < num_samples:
+  while infinite_loop or sample_count < num_samples:  # pyrefly: ignore[unsupported-operation]
     sampler, algo_name, length = random.choice(clrs_samplers)
     sample = sampler.next(batch_size=1)  # get one sample from the sampler.
     question, answer = clrs_utils.format_clrs_example(

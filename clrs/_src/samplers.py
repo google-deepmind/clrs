@@ -197,9 +197,9 @@ class Sampler(abc.ABC):
         # Returns a fixed-size random batch.
         indices = self._rng.choice(self._num_samples, (batch_size,),
                                    replace=True)
-        inputs = _subsample_data(self._inputs, indices, axis=0)
-        outputs = _subsample_data(self._outputs, indices, axis=0)
-        hints = _subsample_data(self._hints, indices, axis=1)
+        inputs = _subsample_data(self._inputs, indices, axis=0)  # pyrefly: ignore[bad-argument-type]
+        outputs = _subsample_data(self._outputs, indices, axis=0)  # pyrefly: ignore[bad-argument-type]
+        hints = _subsample_data(self._hints, indices, axis=1)  # pyrefly: ignore[bad-argument-type]
         lengths = self._lengths[indices]
 
     else:
@@ -919,7 +919,7 @@ def _batch_hints(
         assert hint_lengths[sample_idx] == cur_length
       else:
         hint_lengths[sample_idx] = cur_length
-  return batched_traj, hint_lengths
+  return batched_traj, hint_lengths  # pyrefly: ignore[bad-return]
 
 
 def _subsample_data(
@@ -932,7 +932,7 @@ def _subsample_data(
   for dp in trajectory:
     sampled_data = np.take(dp.data, idx, axis=axis)
     sampled_traj.append(
-        probing.DataPoint(dp.name, dp.location, dp.type_, sampled_data))
+        probing.DataPoint(dp.name, dp.location, dp.type_, sampled_data))  # pyrefly: ignore[bad-argument-count]
   return sampled_traj
 
 
@@ -948,19 +948,19 @@ def _preprocess_permutations(probes, enforce_permutations):
       new_x, mask = probing.predecessor_to_cyclic_predecessor_and_first(x.data)
       output.append(
           probing.DataPoint(
-              name=x.name,
-              location=x.location,
-              type_=specs.Type.PERMUTATION_POINTER,
-              data=new_x))
+              name=x.name,  # pyrefly: ignore[unexpected-keyword]
+              location=x.location,  # pyrefly: ignore[unexpected-keyword]
+              type_=specs.Type.PERMUTATION_POINTER,  # pyrefly: ignore[unexpected-keyword]
+              data=new_x))  # pyrefly: ignore[unexpected-keyword]
       output.append(
           probing.DataPoint(
-              name=x.name + '_mask',
-              location=x.location,
-              type_=specs.Type.MASK_ONE,
-              data=mask))
+              name=x.name + '_mask',  # pyrefly: ignore[unexpected-keyword]
+              location=x.location,  # pyrefly: ignore[unexpected-keyword]
+              type_=specs.Type.MASK_ONE,  # pyrefly: ignore[unexpected-keyword]
+              data=mask))  # pyrefly: ignore[unexpected-keyword]
     else:
-      output.append(probing.DataPoint(name=x.name, location=x.location,
-                                      type_=specs.Type.POINTER, data=x.data))
+      output.append(probing.DataPoint(name=x.name, location=x.location,  # pyrefly: ignore[unexpected-keyword]
+                                      type_=specs.Type.POINTER, data=x.data))  # pyrefly: ignore[unexpected-keyword]
   return output
 
 
@@ -1009,8 +1009,8 @@ def process_pred_as_input(spec, sample_iterator):
           assert np.sum(np.abs(pred_h.data[1:int(features.lengths[i]), i] -
                                pred_h.data[0, i])) == 0.0
         inputs = tuple(features.inputs) + (
-            probing.DataPoint(name='pred', location=pred_h.location,
-                              type_=pred_h.type_, data=pred_h.data[0]),)
+            probing.DataPoint(name='pred', location=pred_h.location,  # pyrefly: ignore[unexpected-keyword]
+                              type_=pred_h.type_, data=pred_h.data[0]),)  # pyrefly: ignore[unexpected-keyword]
         features = features._replace(inputs=tuple(inputs),
                                      hints=tuple(hints))
         feedback = feedback._replace(features=features)

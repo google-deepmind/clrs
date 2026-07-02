@@ -175,16 +175,16 @@ class SamplersTest(parameterized.TestCase):
   def test_batch_io(self):
     sample = [
         probing.DataPoint(
-            name='x',
-            location=specs.Location.NODE,
-            type_=specs.Type.SCALAR,
-            data=np.zeros([1, 3]),
+            name='x',  # pyrefly: ignore[unexpected-keyword]
+            location=specs.Location.NODE,  # pyrefly: ignore[unexpected-keyword]
+            type_=specs.Type.SCALAR,  # pyrefly: ignore[unexpected-keyword]
+            data=np.zeros([1, 3]),  # pyrefly: ignore[unexpected-keyword]
         ),
         probing.DataPoint(
-            name='y',
-            location=specs.Location.EDGE,
-            type_=specs.Type.MASK,
-            data=np.zeros([1, 3, 3]),
+            name='y',  # pyrefly: ignore[unexpected-keyword]
+            location=specs.Location.EDGE,  # pyrefly: ignore[unexpected-keyword]
+            type_=specs.Type.MASK,  # pyrefly: ignore[unexpected-keyword]
+            data=np.zeros([1, 3, 3]),  # pyrefly: ignore[unexpected-keyword]
         ),
     ]
 
@@ -197,31 +197,31 @@ class SamplersTest(parameterized.TestCase):
   def test_batch_hint(self):
     sample_0 = [
         probing.DataPoint(
-            name='x',
-            location=specs.Location.NODE,
-            type_=specs.Type.MASK,
-            data=np.zeros([2, 1, 3]),
+            name='x',  # pyrefly: ignore[unexpected-keyword]
+            location=specs.Location.NODE,  # pyrefly: ignore[unexpected-keyword]
+            type_=specs.Type.MASK,  # pyrefly: ignore[unexpected-keyword]
+            data=np.zeros([2, 1, 3]),  # pyrefly: ignore[unexpected-keyword]
         ),
         probing.DataPoint(
-            name='y',
-            location=specs.Location.NODE,
-            type_=specs.Type.POINTER,
-            data=np.zeros([2, 1, 3]),
+            name='y',  # pyrefly: ignore[unexpected-keyword]
+            location=specs.Location.NODE,  # pyrefly: ignore[unexpected-keyword]
+            type_=specs.Type.POINTER,  # pyrefly: ignore[unexpected-keyword]
+            data=np.zeros([2, 1, 3]),  # pyrefly: ignore[unexpected-keyword]
         ),
     ]
 
     sample_1 = [
         probing.DataPoint(
-            name='x',
-            location=specs.Location.NODE,
-            type_=specs.Type.MASK,
-            data=np.zeros([1, 1, 3]),
+            name='x',  # pyrefly: ignore[unexpected-keyword]
+            location=specs.Location.NODE,  # pyrefly: ignore[unexpected-keyword]
+            type_=specs.Type.MASK,  # pyrefly: ignore[unexpected-keyword]
+            data=np.zeros([1, 1, 3]),  # pyrefly: ignore[unexpected-keyword]
         ),
         probing.DataPoint(
-            name='y',
-            location=specs.Location.NODE,
-            type_=specs.Type.POINTER,
-            data=np.zeros([1, 1, 3]),
+            name='y',  # pyrefly: ignore[unexpected-keyword]
+            location=specs.Location.NODE,  # pyrefly: ignore[unexpected-keyword]
+            type_=specs.Type.POINTER,  # pyrefly: ignore[unexpected-keyword]
+            data=np.zeros([1, 1, 3]),  # pyrefly: ignore[unexpected-keyword]
         ),
     ]
 
@@ -244,10 +244,10 @@ class SamplersTest(parameterized.TestCase):
     for len_ in lens:
       trajectory.append([
           probing.DataPoint(
-              name='x',
-              location=specs.Location.NODE,
-              type_=specs.Type.MASK,
-              data=np.ones([len_, 1, 3]),
+              name='x',  # pyrefly: ignore[unexpected-keyword]
+              location=specs.Location.NODE,  # pyrefly: ignore[unexpected-keyword]
+              type_=specs.Type.MASK,  # pyrefly: ignore[unexpected-keyword]
+              data=np.ones([len_, 1, 3]),  # pyrefly: ignore[unexpected-keyword]
           )
       ])
 

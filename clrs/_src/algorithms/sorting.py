@@ -81,8 +81,8 @@ def insertion_sort(A: _Array) -> _Out:
         specs.Stage.HINT,
         next_probe={
             'pred_h': probing.array(np.copy(A_pos)),
-            'i': probing.mask_one(stor_pos, np.copy(A.shape[0])),
-            'j': probing.mask_one(j, np.copy(A.shape[0]))
+            'i': probing.mask_one(stor_pos, np.copy(A.shape[0])),  # pyrefly: ignore[bad-argument-type]
+            'j': probing.mask_one(j, np.copy(A.shape[0]))  # pyrefly: ignore[bad-argument-type]
         })
 
   probing.push(
@@ -131,8 +131,8 @@ def bubble_sort(A: _Array) -> _Out:
           specs.Stage.HINT,
           next_probe={
               'pred_h': probing.array(np.copy(A_pos)),
-              'i': probing.mask_one(A_pos[i], np.copy(A.shape[0])),
-              'j': probing.mask_one(A_pos[j], np.copy(A.shape[0]))
+              'i': probing.mask_one(A_pos[i], np.copy(A.shape[0])),  # pyrefly: ignore[bad-argument-type]
+              'j': probing.mask_one(A_pos[j], np.copy(A.shape[0]))  # pyrefly: ignore[bad-argument-type]
           })
 
   probing.push(

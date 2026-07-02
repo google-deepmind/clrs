@@ -243,7 +243,7 @@ def make_multi_sampler(sizes, rng, **kwargs):
     while True:
       for s in ss:
         yield next(s)
-  return cycle_samplers(), tot_samples, spec
+  return cycle_samplers(), tot_samples, spec  # pyrefly: ignore[unbound-name]
 
 
 def _concat(dps, axis):
@@ -500,7 +500,7 @@ def main(unused_argv):
         all_length_features = [all_features] + [
             [next(t).features for t in train_samplers]
             for _ in range(len(train_lengths))]
-        train_model.init(all_length_features[:-1], FLAGS.seed + 1)
+        train_model.init(all_length_features[:-1], FLAGS.seed + 1)  # pyrefly: ignore[bad-argument-type]
       else:
         train_model.init(all_features, FLAGS.seed + 1)
 

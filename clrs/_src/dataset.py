@@ -49,7 +49,7 @@ def _build_default_builder_configs():
   for split in ['train', 'val', 'test']:
     for alg in specs.CLRS_30_ALGS:
       DEFAULT_BUILDER_CONFIGS.append(
-          CLRSConfig(name=f'{alg}_{split}', split=split))
+          CLRSConfig(name=f'{alg}_{split}', split=split))  # pyrefly: ignore[unexpected-keyword]
 
 
 _build_default_builder_configs()
@@ -108,7 +108,7 @@ class CLRSDataset(tfds.core.GeneratorBasedBuilder):
       self._create_data(single_sample=True)
 
     data = {k: _correct_axis_filtering(v, 0, k)
-            for k, v in self._instantiated_dataset.items()}
+            for k, v in self._instantiated_dataset.items()}  # pyrefly: ignore[missing-attribute]
     data_info = {
         k: tfds.features.Tensor(shape=v.shape, dtype=tf.dtypes.as_dtype(
             v.dtype)) for k, v in data.items()}
@@ -163,7 +163,7 @@ def _preprocess(data_point, algorithm=None):
       continue
     data_point_name = name.split('_')
     name = '_'.join(data_point_name[1:])
-    (stage, location, dp_type) = specs.SPECS[algorithm][name]
+    (stage, location, dp_type) = specs.SPECS[algorithm][name]  # pyrefly: ignore[bad-index]
     assert stage == data_point_name[0]
     if stage == specs.Stage.HINT:
       data = tf.experimental.numpy.swapaxes(data, 0, 1)
@@ -269,7 +269,7 @@ def chunkify(dataset: Iterator[samplers.Feedback], chunk_length: int):
     chunk_inputs = jax.tree_util.tree_map(np.zeros_like, chunk_inputs)
     chunk_hints = jax.tree_util.tree_map(np.zeros_like, chunk_hints)
     chunk_outputs = jax.tree_util.tree_map(np.zeros_like, chunk_outputs)
-    start_mark = np.zeros((chunk_length, batch_size), dtype=int)
+    start_mark = np.zeros((chunk_length, batch_size), dtype=int)  # pyrefly: ignore[unbound-name]
     end_mark = np.zeros((chunk_length, batch_size), dtype=int)
 
     # Get enough data batches to fill the new chunk
