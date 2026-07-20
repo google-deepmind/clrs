@@ -167,7 +167,7 @@ def _preprocess(data_point, algorithm=None):
     assert stage == data_point_name[0]
     if stage == specs.Stage.HINT:
       data = tf.experimental.numpy.swapaxes(data, 0, 1)
-    dp = probing.DataPoint(name, location, dp_type, data)
+    dp = probing.DataPoint(name, location, dp_type, data)  # pyrefly: ignore[bad-argument-count]
     if stage == specs.Stage.INPUT:
       inputs.append(dp)
     elif stage == specs.Stage.OUTPUT:
