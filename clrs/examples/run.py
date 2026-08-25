@@ -435,7 +435,7 @@ def main(unused_argv):
       rng=rng,
       train_lengths=train_lengths,
       algorithms=FLAGS.algorithms,
-      val_lengths=[np.amax(train_lengths)],
+      val_lengths=[np.amax(train_lengths)],  # pyrefly: ignore[bad-argument-type]
       test_lengths=[-1],
       train_batch_size=FLAGS.batch_size,
   )
