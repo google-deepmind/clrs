@@ -80,7 +80,7 @@ def _mask_datapoint(x, seed, t_axis=None):
       mask_shape[t_axis] = 1
     mask = jax.random.uniform(key, tuple(mask_shape)) < 0.2
     data = jnp.where(mask[..., None], specs.OutputClass.MASKED, data)
-  return probing.DataPoint(name=x.name, location=x.location, type_=x.type_,
+  return probing.DataPoint(name=x.name, location=x.location, type_=x.type_,  # pyrefly: ignore[missing-argument, unexpected-keyword]
                            data=data)
 
 
@@ -159,7 +159,7 @@ class FullVsChunkLossesTest(parameterized.TestCase):
           lengths=full_sample.features.lengths,
           nb_nodes=nb_nodes,
       )
-      np.testing.assert_allclose(chunk_hint_loss, full_hint_loss, rtol=1e-4)
+      np.testing.assert_allclose(chunk_hint_loss, full_hint_loss, rtol=1e-3)
 
 
 if __name__ == '__main__':

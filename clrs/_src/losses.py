@@ -75,9 +75,9 @@ def output_loss_chunked(truth: _DataPoint, pred: _Array,
     loss = -jnp.sum(truth.data * pred, axis=-1)
 
   if mask is not None:
-    mask = mask * _expand_and_broadcast_to(is_last, loss)
+    mask = mask * _expand_and_broadcast_to(is_last, loss)  # pyrefly: ignore[unbound-name]
   else:
-    mask = _expand_and_broadcast_to(is_last, loss)
+    mask = _expand_and_broadcast_to(is_last, loss)  # pyrefly: ignore[unbound-name]
   total_mask = jnp.maximum(jnp.sum(mask), EPS)
   return jnp.sum(jnp.where(mask, loss, 0.0)) / total_mask  # pytype: disable=bad-return-type  # jnp-type
 
@@ -171,7 +171,7 @@ def _hint_loss(
   """Hint loss helper."""
   mask = None
   if truth_type == _Type.SCALAR:
-    loss = (pred - truth_data)**2
+    loss = (pred - truth_data)**2  # pyrefly: ignore[unsupported-operation]
 
   elif truth_type == _Type.MASK:
     loss = (jnp.maximum(pred, 0) - pred * truth_data +
@@ -198,7 +198,7 @@ def _hint_loss(
     loss = -jnp.sum(truth_data * pred, axis=-1)
 
   if mask is None:
-    mask = jnp.ones_like(loss)
+    mask = jnp.ones_like(loss)  # pyrefly: ignore[unbound-name]
   return loss, mask
 
 

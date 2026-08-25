@@ -117,7 +117,7 @@ class GAT(Processor):
     skip = hk.Linear(self.out_size)
 
     bias_mat = (adj_mat - 1.0) * 1e9
-    bias_mat = jnp.tile(bias_mat[..., None],
+    bias_mat = jnp.tile(bias_mat[..., None],  # pyrefly: ignore[bad-index]
                         (1, 1, 1, self.nb_heads))     # [B, N, N, H]
     bias_mat = jnp.transpose(bias_mat, (0, 3, 1, 2))  # [B, H, N, N]
 
@@ -221,7 +221,7 @@ class GATv2(Processor):
     skip = hk.Linear(self.out_size)
 
     bias_mat = (adj_mat - 1.0) * 1e9
-    bias_mat = jnp.tile(bias_mat[..., None],
+    bias_mat = jnp.tile(bias_mat[..., None],  # pyrefly: ignore[bad-index]
                         (1, 1, 1, self.nb_heads))     # [B, N, N, H]
     bias_mat = jnp.transpose(bias_mat, (0, 3, 1, 2))  # [B, H, N, N]
 
@@ -339,7 +339,7 @@ class GATv2FullD2(GATv2):
             adj_mat=adj_mat,
             hidden=hidden
         )
-        emb_values.append(cell_embedding[0])
+        emb_values.append(cell_embedding[0])  # pyrefly: ignore[bad-index]
       ret_nodes.append(
           jnp.mean(jnp.stack(emb_values, axis=0), axis=0)
       )
@@ -596,9 +596,9 @@ class MemNetMasked(Processor):
     """MemNet inference step."""
 
     del hidden
-    node_and_graph_fts = jnp.concatenate([node_fts, graph_fts[:, None]],
+    node_and_graph_fts = jnp.concatenate([node_fts, graph_fts[:, None]],  # pyrefly: ignore[bad-index]
                                          axis=1)
-    edge_fts_padded = jnp.pad(edge_fts * adj_mat[..., None],
+    edge_fts_padded = jnp.pad(edge_fts * adj_mat[..., None],  # pyrefly: ignore[bad-index]
                               ((0, 0), (0, 1), (0, 1), (0, 0)))
     nxt_hidden = jax.vmap(self._apply, (1), 1)(node_and_graph_fts,
                                                edge_fts_padded)
@@ -628,7 +628,7 @@ class MemNetMasked(Processor):
           init=self._init_func)
       memory_biases = hk.get_parameter(
           'memory_contents',
-          shape=[self._memory_size, self._embedding_size],
+          shape=[self._memory_size, self._embedding_size],  # pyrefly: ignore[bad-argument-type]
           init=self._init_func)
       output_biases = hk.get_parameter(
           'output_biases',
@@ -639,15 +639,15 @@ class MemNetMasked(Processor):
 
     # This is "A" in the paper.
     if self._apply_embeddings:
-      stories_biases = jnp.concatenate([stories_biases, nil_word_slot], axis=0)
+      stories_biases = jnp.concatenate([stories_biases, nil_word_slot], axis=0)  # pyrefly: ignore[unbound-name]
       memory_embeddings = jnp.take(
           stories_biases, stories.reshape([-1]).astype(jnp.int32),
           axis=0).reshape(list(stories.shape) + [self._embedding_size])
       memory_embeddings = jnp.pad(
           memory_embeddings,
-          ((0, 0), (0, self._memory_size - jnp.shape(memory_embeddings)[1]),
+          ((0, 0), (0, self._memory_size - jnp.shape(memory_embeddings)[1]),  # pyrefly: ignore[unsupported-operation]
            (0, 0), (0, 0)))
-      memory = jnp.sum(memory_embeddings * self._encodings, 2) + memory_biases
+      memory = jnp.sum(memory_embeddings * self._encodings, 2) + memory_biases  # pyrefly: ignore[unbound-name]
     else:
       memory = stories
 
@@ -655,7 +655,7 @@ class MemNetMasked(Processor):
     # sentences), then there these lines are substituted by
     # query_embeddings = 0.1.
     if self._apply_embeddings:
-      query_biases = jnp.concatenate([query_biases, nil_word_slot], axis=0)
+      query_biases = jnp.concatenate([query_biases, nil_word_slot], axis=0)  # pyrefly: ignore[unbound-name]
       query_embeddings = jnp.take(
           query_biases, queries.reshape([-1]).astype(jnp.int32),
           axis=0).reshape(list(queries.shape) + [self._embedding_size])
@@ -666,13 +666,13 @@ class MemNetMasked(Processor):
 
     # This is "C" in the paper.
     if self._apply_embeddings:
-      output_biases = jnp.concatenate([output_biases, nil_word_slot], axis=0)
+      output_biases = jnp.concatenate([output_biases, nil_word_slot], axis=0)  # pyrefly: ignore[unbound-name]
       output_embeddings = jnp.take(
           output_biases, stories.reshape([-1]).astype(jnp.int32),
           axis=0).reshape(list(stories.shape) + [self._embedding_size])
       output_embeddings = jnp.pad(
           output_embeddings,
-          ((0, 0), (0, self._memory_size - jnp.shape(output_embeddings)[1]),
+          ((0, 0), (0, self._memory_size - jnp.shape(output_embeddings)[1]),  # pyrefly: ignore[unsupported-operation]
            (0, 0), (0, 0)))
       output = jnp.sum(output_embeddings * self._encodings, 2)
     else:
@@ -711,7 +711,7 @@ class MemNetMasked(Processor):
         output_layer = self._nonlin(output_layer)
 
     # This linear here is "W".
-    ret = hk.Linear(self._vocab_size, with_bias=False)(output_layer)
+    ret = hk.Linear(self._vocab_size, with_bias=False)(output_layer)  # pyrefly: ignore[unbound-name]
 
     if self._use_ln:
       ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
