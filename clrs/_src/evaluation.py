@@ -50,10 +50,10 @@ def fuse_perm_and_mask(perm: probing.DataPoint,
   data = np.where(mask.data > 0.5,
                   np.arange(perm.data.shape[-1]),  # self-pointers
                   np.argmax(perm.data, axis=-1))   # original pointers
-  return probing.DataPoint(name=perm.name,
-                           type_=specs.Type.POINTER,
-                           location=perm.location,
-                           data=data)
+  return probing.DataPoint(name=perm.name,  # pyrefly: ignore[unexpected-keyword]
+                           type_=specs.Type.POINTER,  # pyrefly: ignore[unexpected-keyword]
+                           location=perm.location,  # pyrefly: ignore[unexpected-keyword]
+                           data=data)  # pyrefly: ignore[unexpected-keyword]
 
 
 def _reduce_permutations_tuple(

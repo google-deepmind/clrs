@@ -59,8 +59,8 @@ def _without_permutation(feedback):
       outputs.append(x)
       continue
     assert x.location == specs.Location.NODE
-    outputs.append(probing.DataPoint(name=x.name, location=x.location,
-                                     type_=specs.Type.POINTER, data=x.data))
+    outputs.append(probing.DataPoint(name=x.name, location=x.location,  # pyrefly: ignore[missing-argument, unexpected-keyword]
+                                     type_=specs.Type.POINTER, data=x.data))  # pyrefly: ignore[unexpected-keyword]
   return feedback._replace(outputs=outputs)
 
 
@@ -271,7 +271,7 @@ class BaselinesTest(parameterized.TestCase):
     for algo_idx in range(len(algos)):
       init_params = copy.deepcopy(baseline.params)
       _ = baseline.feedback(  # pytype: disable=wrong-arg-types
-          rng_key,
+          rng_key,  # pyrefly: ignore[bad-argument-type]
           batches[algo_idx],
           algorithm_index=(0, algo_idx) if is_chunked else algo_idx)
       param_changes.append(_change(init_params, baseline.params))

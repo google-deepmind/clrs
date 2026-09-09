@@ -74,8 +74,8 @@ def preprocess(dp: _DataPoint, nb_nodes: int) -> _DataPoint:
     data = dp.data.astype(jnp.float32)
     if dp.type_ == _Type.SOFT_POINTER:
       new_type = _Type.POINTER
-  dp = probing.DataPoint(
-      name=dp.name, location=dp.location, type_=new_type, data=data)
+  dp = probing.DataPoint(  # pyrefly: ignore[missing-argument]
+      name=dp.name, location=dp.location, type_=new_type, data=data)  # pyrefly: ignore[unexpected-keyword]
 
   return dp
 

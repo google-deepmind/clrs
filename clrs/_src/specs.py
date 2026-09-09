@@ -119,7 +119,7 @@ SPECS = types.MappingProxyType({
         'pred': (Stage.OUTPUT, Location.NODE, Type.SHOULD_BE_PERMUTATION),
         'pred_h': (Stage.HINT, Location.NODE, Type.POINTER),
         'i': (Stage.HINT, Location.NODE, Type.MASK_ONE),
-        'j': (Stage.HINT, Location.NODE, Type.MASK_ONE)
+        'j': (Stage.HINT, Location.NODE, Type.MASK_ONE),
     },
     'bubble_sort': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -127,7 +127,7 @@ SPECS = types.MappingProxyType({
         'pred': (Stage.OUTPUT, Location.NODE, Type.SHOULD_BE_PERMUTATION),
         'pred_h': (Stage.HINT, Location.NODE, Type.POINTER),
         'i': (Stage.HINT, Location.NODE, Type.MASK_ONE),
-        'j': (Stage.HINT, Location.NODE, Type.MASK_ONE)
+        'j': (Stage.HINT, Location.NODE, Type.MASK_ONE),
     },
     'heapsort': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -139,7 +139,7 @@ SPECS = types.MappingProxyType({
         'j': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'largest': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'heap_size': (Stage.HINT, Location.NODE, Type.MASK_ONE),
-        'phase': (Stage.HINT, Location.GRAPH, Type.CATEGORICAL)
+        'phase': (Stage.HINT, Location.GRAPH, Type.CATEGORICAL),
     },
     'quicksort': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -149,7 +149,7 @@ SPECS = types.MappingProxyType({
         'p': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'r': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'i': (Stage.HINT, Location.NODE, Type.MASK_ONE),
-        'j': (Stage.HINT, Location.NODE, Type.MASK_ONE)
+        'j': (Stage.HINT, Location.NODE, Type.MASK_ONE),
     },
     'quickselect': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -161,7 +161,8 @@ SPECS = types.MappingProxyType({
         'i': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'j': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'i_rank': (Stage.HINT, Location.GRAPH, Type.SCALAR),
-        'target': (Stage.HINT, Location.GRAPH, Type.SCALAR)
+        'target': (Stage.HINT, Location.GRAPH, Type.SCALAR),
+        'pivot': (Stage.HINT, Location.NODE, Type.MASK_ONE),
     },
     'minimum': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -169,7 +170,7 @@ SPECS = types.MappingProxyType({
         'min': (Stage.OUTPUT, Location.NODE, Type.MASK_ONE),
         'pred_h': (Stage.HINT, Location.NODE, Type.POINTER),
         'min_h': (Stage.HINT, Location.NODE, Type.MASK_ONE),
-        'i': (Stage.HINT, Location.NODE, Type.MASK_ONE)
+        'i': (Stage.HINT, Location.NODE, Type.MASK_ONE),
     },
     'binary_search': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -179,7 +180,7 @@ SPECS = types.MappingProxyType({
         'pred_h': (Stage.HINT, Location.NODE, Type.POINTER),
         'low': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'high': (Stage.HINT, Location.NODE, Type.MASK_ONE),
-        'mid': (Stage.HINT, Location.NODE, Type.MASK_ONE)
+        'mid': (Stage.HINT, Location.NODE, Type.MASK_ONE),
     },
     'find_maximum_subarray': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -207,7 +208,7 @@ SPECS = types.MappingProxyType({
         'sum': (Stage.HINT, Location.GRAPH, Type.SCALAR),
         'left_x_sum': (Stage.HINT, Location.GRAPH, Type.SCALAR),
         'right_x_sum': (Stage.HINT, Location.GRAPH, Type.SCALAR),
-        'phase': (Stage.HINT, Location.GRAPH, Type.CATEGORICAL)
+        'phase': (Stage.HINT, Location.GRAPH, Type.CATEGORICAL),
     },
     'find_maximum_subarray_kadane': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -220,7 +221,7 @@ SPECS = types.MappingProxyType({
         'best_sum': (Stage.HINT, Location.GRAPH, Type.SCALAR),
         'i': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'j': (Stage.HINT, Location.NODE, Type.MASK_ONE),
-        'sum': (Stage.HINT, Location.GRAPH, Type.SCALAR)
+        'sum': (Stage.HINT, Location.GRAPH, Type.SCALAR),
     },
     'matrix_chain_order': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -229,7 +230,7 @@ SPECS = types.MappingProxyType({
         'pred_h': (Stage.HINT, Location.NODE, Type.POINTER),
         'm': (Stage.HINT, Location.EDGE, Type.SCALAR),
         's_h': (Stage.HINT, Location.EDGE, Type.POINTER),
-        'msk': (Stage.HINT, Location.EDGE, Type.MASK)
+        'msk': (Stage.HINT, Location.EDGE, Type.MASK),
     },
     'lcs_length': {
         'string': (Stage.INPUT, Location.NODE, Type.MASK),
@@ -238,7 +239,7 @@ SPECS = types.MappingProxyType({
         'b': (Stage.OUTPUT, Location.EDGE, Type.CATEGORICAL),
         'pred_h': (Stage.HINT, Location.NODE, Type.POINTER),
         'b_h': (Stage.HINT, Location.EDGE, Type.CATEGORICAL),
-        'c': (Stage.HINT, Location.EDGE, Type.SCALAR)
+        'c': (Stage.HINT, Location.EDGE, Type.SCALAR),
     },
     'optimal_bst': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -249,7 +250,7 @@ SPECS = types.MappingProxyType({
         'root_h': (Stage.HINT, Location.EDGE, Type.POINTER),
         'e': (Stage.HINT, Location.EDGE, Type.SCALAR),
         'w': (Stage.HINT, Location.EDGE, Type.SCALAR),
-        'msk': (Stage.HINT, Location.EDGE, Type.MASK)
+        'msk': (Stage.HINT, Location.EDGE, Type.MASK),
     },
     'activity_selector': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -259,7 +260,7 @@ SPECS = types.MappingProxyType({
         'pred_h': (Stage.HINT, Location.NODE, Type.POINTER),
         'selected_h': (Stage.HINT, Location.NODE, Type.MASK),
         'm': (Stage.HINT, Location.NODE, Type.MASK_ONE),
-        'k': (Stage.HINT, Location.NODE, Type.MASK_ONE)
+        'k': (Stage.HINT, Location.NODE, Type.MASK_ONE),
     },
     'task_scheduling': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -269,7 +270,7 @@ SPECS = types.MappingProxyType({
         'pred_h': (Stage.HINT, Location.NODE, Type.POINTER),
         'selected_h': (Stage.HINT, Location.NODE, Type.MASK),
         'i': (Stage.HINT, Location.NODE, Type.MASK_ONE),
-        't': (Stage.HINT, Location.GRAPH, Type.SCALAR)
+        't': (Stage.HINT, Location.GRAPH, Type.SCALAR),
     },
     'dfs': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -285,7 +286,7 @@ SPECS = types.MappingProxyType({
         'u': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'v': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         's_last': (Stage.HINT, Location.NODE, Type.MASK_ONE),
-        'time': (Stage.HINT, Location.GRAPH, Type.SCALAR)
+        'time': (Stage.HINT, Location.GRAPH, Type.SCALAR),
     },
     'topological_sort': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -300,7 +301,7 @@ SPECS = types.MappingProxyType({
         's': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'u': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'v': (Stage.HINT, Location.NODE, Type.MASK_ONE),
-        's_last': (Stage.HINT, Location.NODE, Type.MASK_ONE)
+        's_last': (Stage.HINT, Location.NODE, Type.MASK_ONE),
     },
     'strongly_connected_components': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -318,7 +319,7 @@ SPECS = types.MappingProxyType({
         'v': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         's_last': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'time': (Stage.HINT, Location.GRAPH, Type.SCALAR),
-        'phase': (Stage.HINT, Location.GRAPH, Type.MASK)
+        'phase': (Stage.HINT, Location.GRAPH, Type.MASK),
     },
     'articulation_points': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -337,7 +338,7 @@ SPECS = types.MappingProxyType({
         'u': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'v': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         's_last': (Stage.HINT, Location.NODE, Type.MASK_ONE),
-        'time': (Stage.HINT, Location.GRAPH, Type.SCALAR)
+        'time': (Stage.HINT, Location.GRAPH, Type.SCALAR),
     },
     'bridges': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -355,7 +356,7 @@ SPECS = types.MappingProxyType({
         'u': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'v': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         's_last': (Stage.HINT, Location.NODE, Type.MASK_ONE),
-        'time': (Stage.HINT, Location.GRAPH, Type.SCALAR)
+        'time': (Stage.HINT, Location.GRAPH, Type.SCALAR),
     },
     'bfs': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -364,7 +365,7 @@ SPECS = types.MappingProxyType({
         'adj': (Stage.INPUT, Location.EDGE, Type.MASK),
         'pi': (Stage.OUTPUT, Location.NODE, Type.POINTER),
         'reach_h': (Stage.HINT, Location.NODE, Type.MASK),
-        'pi_h': (Stage.HINT, Location.NODE, Type.POINTER)
+        'pi_h': (Stage.HINT, Location.NODE, Type.POINTER),
     },
     'mst_kruskal': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -379,7 +380,7 @@ SPECS = types.MappingProxyType({
         'root_v': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'mask_u': (Stage.HINT, Location.NODE, Type.MASK),
         'mask_v': (Stage.HINT, Location.NODE, Type.MASK),
-        'phase': (Stage.HINT, Location.GRAPH, Type.CATEGORICAL)
+        'phase': (Stage.HINT, Location.GRAPH, Type.CATEGORICAL),
     },
     'mst_prim': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -391,7 +392,7 @@ SPECS = types.MappingProxyType({
         'key': (Stage.HINT, Location.NODE, Type.SCALAR),
         'mark': (Stage.HINT, Location.NODE, Type.MASK),
         'in_queue': (Stage.HINT, Location.NODE, Type.MASK),
-        'u': (Stage.HINT, Location.NODE, Type.MASK_ONE)
+        'u': (Stage.HINT, Location.NODE, Type.MASK_ONE),
     },
     'bellman_ford': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -401,7 +402,7 @@ SPECS = types.MappingProxyType({
         'pi': (Stage.OUTPUT, Location.NODE, Type.POINTER),
         'pi_h': (Stage.HINT, Location.NODE, Type.POINTER),
         'd': (Stage.HINT, Location.NODE, Type.SCALAR),
-        'msk': (Stage.HINT, Location.NODE, Type.MASK)
+        'msk': (Stage.HINT, Location.NODE, Type.MASK),
     },
     'dag_shortest_paths': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -419,7 +420,7 @@ SPECS = types.MappingProxyType({
         'u': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'v': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         's_last': (Stage.HINT, Location.NODE, Type.MASK_ONE),
-        'phase': (Stage.HINT, Location.GRAPH, Type.MASK)
+        'phase': (Stage.HINT, Location.GRAPH, Type.MASK),
     },
     'dijkstra': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -431,7 +432,7 @@ SPECS = types.MappingProxyType({
         'd': (Stage.HINT, Location.NODE, Type.SCALAR),
         'mark': (Stage.HINT, Location.NODE, Type.MASK),
         'in_queue': (Stage.HINT, Location.NODE, Type.MASK),
-        'u': (Stage.HINT, Location.NODE, Type.MASK_ONE)
+        'u': (Stage.HINT, Location.NODE, Type.MASK_ONE),
     },
     'floyd_warshall': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -441,7 +442,7 @@ SPECS = types.MappingProxyType({
         'Pi_h': (Stage.HINT, Location.EDGE, Type.POINTER),
         'D': (Stage.HINT, Location.EDGE, Type.SCALAR),
         'msk': (Stage.HINT, Location.EDGE, Type.MASK),
-        'k': (Stage.HINT, Location.NODE, Type.MASK_ONE)
+        'k': (Stage.HINT, Location.NODE, Type.MASK_ONE),
     },
     'bipartite_matching': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -457,7 +458,7 @@ SPECS = types.MappingProxyType({
         'msk': (Stage.HINT, Location.NODE, Type.MASK),
         'pi': (Stage.HINT, Location.NODE, Type.POINTER),
         'u': (Stage.HINT, Location.NODE, Type.MASK_ONE),
-        'phase': (Stage.HINT, Location.GRAPH, Type.MASK)
+        'phase': (Stage.HINT, Location.GRAPH, Type.MASK),
     },
     'naive_string_matcher': {
         'string': (Stage.INPUT, Location.NODE, Type.MASK),
@@ -467,7 +468,7 @@ SPECS = types.MappingProxyType({
         'pred_h': (Stage.HINT, Location.NODE, Type.POINTER),
         's': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'i': (Stage.HINT, Location.NODE, Type.MASK_ONE),
-        'j': (Stage.HINT, Location.NODE, Type.MASK_ONE)
+        'j': (Stage.HINT, Location.NODE, Type.MASK_ONE),
     },
     'kmp_matcher': {
         'string': (Stage.INPUT, Location.NODE, Type.MASK),
@@ -483,7 +484,7 @@ SPECS = types.MappingProxyType({
         'q_reset': (Stage.HINT, Location.GRAPH, Type.MASK),
         's': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'i': (Stage.HINT, Location.NODE, Type.MASK_ONE),
-        'phase': (Stage.HINT, Location.GRAPH, Type.MASK)
+        'phase': (Stage.HINT, Location.GRAPH, Type.MASK),
     },
     'segments_intersect': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -494,7 +495,7 @@ SPECS = types.MappingProxyType({
         'j': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'k': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'dir': (Stage.HINT, Location.NODE, Type.SCALAR),
-        'on_seg': (Stage.HINT, Location.NODE, Type.MASK)
+        'on_seg': (Stage.HINT, Location.NODE, Type.MASK),
     },
     'graham_scan': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -507,7 +508,7 @@ SPECS = types.MappingProxyType({
         'stack_prev': (Stage.HINT, Location.NODE, Type.POINTER),
         'last_stack': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'i': (Stage.HINT, Location.NODE, Type.MASK_ONE),
-        'phase': (Stage.HINT, Location.GRAPH, Type.CATEGORICAL)
+        'phase': (Stage.HINT, Location.GRAPH, Type.CATEGORICAL),
     },
     'jarvis_march': {
         'pos': (Stage.INPUT, Location.NODE, Type.SCALAR),
@@ -520,6 +521,6 @@ SPECS = types.MappingProxyType({
         'last_point': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'endpoint': (Stage.HINT, Location.NODE, Type.MASK_ONE),
         'i': (Stage.HINT, Location.NODE, Type.MASK_ONE),
-        'phase': (Stage.HINT, Location.GRAPH, Type.CATEGORICAL)
-    }
+        'phase': (Stage.HINT, Location.GRAPH, Type.CATEGORICAL),
+    },
 })

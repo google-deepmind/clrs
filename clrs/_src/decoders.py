@@ -189,8 +189,8 @@ def postprocess(spec: _Spec, preds: Dict[str, _Array],
         data = jax.nn.one_hot(jnp.argmax(data, axis=-1), data.shape[-1])
     else:
       raise ValueError("Invalid type")
-    result[name] = probing.DataPoint(
-        name=name, location=loc, type_=new_t, data=data)
+    result[name] = probing.DataPoint(  # pyrefly: ignore[missing-argument]
+        name=name, location=loc, type_=new_t, data=data)  # pyrefly: ignore[bad-argument-type, unexpected-keyword]
 
   return result
 

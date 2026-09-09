@@ -81,8 +81,8 @@ def insertion_sort(A: _Array) -> _Out:
         specs.Stage.HINT,
         next_probe={
             'pred_h': probing.array(np.copy(A_pos)),
-            'i': probing.mask_one(stor_pos, np.copy(A.shape[0])),
-            'j': probing.mask_one(j, np.copy(A.shape[0]))
+            'i': probing.mask_one(stor_pos, np.copy(A.shape[0])),  # pyrefly: ignore[bad-argument-type]
+            'j': probing.mask_one(j, np.copy(A.shape[0]))  # pyrefly: ignore[bad-argument-type]
         })
 
   probing.push(
@@ -123,21 +123,16 @@ def bubble_sort(A: _Array) -> _Out:
   for i in range(A.shape[0] - 1):
     for j in reversed(range(i + 1, A.shape[0])):
       if A[j] < A[j - 1]:
-        tmp = A[j]
-        A[j] = A[j - 1]
-        A[j - 1] = tmp
-
-        tmp = A_pos[j]
-        A_pos[j] = A_pos[j - 1]
-        A_pos[j - 1] = tmp
+        A[j], A[j - 1] = A[j - 1], A[j]
+        A_pos[j], A_pos[j - 1] = A_pos[j - 1], A_pos[j]
 
       probing.push(
           probes,
           specs.Stage.HINT,
           next_probe={
               'pred_h': probing.array(np.copy(A_pos)),
-              'i': probing.mask_one(A_pos[i], np.copy(A.shape[0])),
-              'j': probing.mask_one(A_pos[j], np.copy(A.shape[0]))
+              'i': probing.mask_one(A_pos[i], np.copy(A.shape[0])),  # pyrefly: ignore[bad-argument-type]
+              'j': probing.mask_one(A_pos[j], np.copy(A.shape[0]))  # pyrefly: ignore[bad-argument-type]
           })
 
   probing.push(
@@ -190,13 +185,8 @@ def heapsort(A: _Array) -> _Out:
     if r < heap_size and A[r] > A[largest]:
       largest = r
     if largest != i:
-      tmp = A[i]
-      A[i] = A[largest]
-      A[largest] = tmp
-
-      tmp = A_pos[i]
-      A_pos[i] = A_pos[largest]
-      A_pos[largest] = tmp
+      A[i], A[largest] = A[largest], A[i]
+      A_pos[i], A_pos[largest] = A_pos[largest], A_pos[i]
 
     probing.push(
         probes,
@@ -221,13 +211,8 @@ def heapsort(A: _Array) -> _Out:
   build_max_heap(A)
   heap_size = A.shape[0]
   for i in reversed(range(1, A.shape[0])):
-    tmp = A[0]
-    A[0] = A[i]
-    A[i] = tmp
-
-    tmp = A_pos[0]
-    A_pos[0] = A_pos[i]
-    A_pos[i] = tmp
+    A[0], A[i] = A[i], A[0]
+    A_pos[0], A_pos[i] = A_pos[i], A_pos[0]
 
     heap_size -= 1
 
@@ -268,12 +253,8 @@ def quicksort(A: _Array, A_pos=None, p=None, r=None, probes=None) -> _Out:
     for j in range(p, r):
       if A[j] <= x:
         i += 1
-        tmp = A[i]
-        A[i] = A[j]
-        A[j] = tmp
-        tmp = A_pos[i]
-        A_pos[i] = A_pos[j]
-        A_pos[j] = tmp
+        A[i], A[j] = A[j], A[i]
+        A_pos[i], A_pos[j] = A_pos[j], A_pos[i]
 
       probing.push(
           probes,
@@ -286,12 +267,8 @@ def quicksort(A: _Array, A_pos=None, p=None, r=None, probes=None) -> _Out:
               'j': probing.mask_one(A_pos[j], A.shape[0])
           })
 
-    tmp = A[i + 1]
-    A[i + 1] = A[r]
-    A[r] = tmp
-    tmp = A_pos[i + 1]
-    A_pos[i + 1] = A_pos[r]
-    A_pos[r] = tmp
+    A[i + 1], A[r] = A[r], A[i + 1]
+    A_pos[i + 1], A_pos[r] = A_pos[r], A_pos[i + 1]
 
     probing.push(
         probes,
