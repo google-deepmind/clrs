@@ -421,7 +421,7 @@ class Net(hk.Module):
     if self.use_lstm:
       # lstm doesn't accept multiple batch dimensions (in our case, batch and
       # nodes), so we vmap over the (first) batch dimension.
-      nxt_hidden, nxt_lstm_state = jax.vmap(self.lstm)(nxt_hidden, lstm_state)
+      nxt_hidden, nxt_lstm_state = jax.vmap(self.lstm)(nxt_hidden, lstm_state)  # pyrefly: ignore[bad-specialization, not-callable]
     else:
       nxt_lstm_state = None
 

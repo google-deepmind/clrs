@@ -604,7 +604,7 @@ class MemNetMasked(Processor):
                                                edge_fts_padded)
 
     # Broadcast hidden state corresponding to graph features across the nodes.
-    nxt_hidden = nxt_hidden[:, :-1] + nxt_hidden[:, -1:]
+    nxt_hidden = nxt_hidden[:, :-1] + nxt_hidden[:, -1:]  # pyrefly: ignore[bad-index]
     return nxt_hidden, None  # pytype: disable=bad-return-type  # numpy-scalars
 
   def _apply(self, queries: _Array, stories: _Array) -> _Array:
