@@ -102,7 +102,7 @@ def find_maximum_subarray(
               'right_low': probing.mask_one(right_low, A.shape[0]),
               'right_high': probing.mask_one(right_high, A.shape[0]),
               'right_sum': r_ctx_sum,
-              'cross_low': probing.mask_one(max_left, A.shape[0]),
+              'cross_low': probing.mask_one(max_left, A.shape[0]),  # pyrefly: ignore[unbound-name]
               'cross_high': probing.mask_one(mid + 1, A.shape[0]),
               'cross_sum': left_sum + A[mid + 1] - 0.1,
               'ret_low': probing.mask_one(low, A.shape[0]),
@@ -168,7 +168,7 @@ def find_maximum_subarray(
               'right_high': probing.mask_one(right_high, A.shape[0]),
               'right_sum': right_sum,
               'cross_low': probing.mask_one(max_left, A.shape[0]),
-              'cross_high': probing.mask_one(max_right, A.shape[0]),
+              'cross_high': probing.mask_one(max_right, A.shape[0]),  # pyrefly: ignore[unbound-name]
               'cross_sum': left_sum + right_sum,
               'ret_low': probing.mask_one(low, A.shape[0]),
               'ret_high': probing.mask_one(high, A.shape[0]),
