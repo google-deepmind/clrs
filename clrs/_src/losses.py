@@ -79,7 +79,7 @@ def output_loss_chunked(truth: _DataPoint, pred: _Array,
   else:
     mask = _expand_and_broadcast_to(is_last, loss)  # pyrefly: ignore[unbound-name]
   total_mask = jnp.maximum(jnp.sum(mask), EPS)
-  return jnp.sum(jnp.where(mask, loss, 0.0)) / total_mask  # pytype: disable=bad-return-type  # jnp-type
+  return jnp.sum(jnp.where(mask, loss, 0.0)) / total_mask  # pyrefly: ignore[bad-return]
 
 
 def output_loss(truth: _DataPoint, pred: _Array, nb_nodes: int) -> float:
@@ -112,7 +112,7 @@ def output_loss(truth: _DataPoint, pred: _Array, nb_nodes: int) -> float:
     # Compute the cross entropy between doubly stochastic pred and truth_data
     total_loss = jnp.mean(-jnp.sum(truth.data * pred, axis=-1))
 
-  return total_loss  # pytype: disable=bad-return-type  # jnp-type
+  return total_loss  # pyrefly: ignore[bad-return, unbound-name]
 
 
 def hint_loss_chunked(
@@ -176,7 +176,7 @@ def _hint_loss(
   elif truth_type == _Type.MASK:
     loss = (jnp.maximum(pred, 0) - pred * truth_data +
             jnp.log1p(jnp.exp(-jnp.abs(pred))))
-    mask = (truth_data != _OutputClass.MASKED).astype(jnp.float32)  # pytype: disable=attribute-error  # numpy-scalars
+    mask = (truth_data != _OutputClass.MASKED).astype(jnp.float32)
 
   elif truth_type == _Type.MASK_ONE:
     loss = -jnp.sum(truth_data * jax.nn.log_softmax(pred), axis=-1,
@@ -204,6 +204,6 @@ def _hint_loss(
 
 def _is_not_done_broadcast(lengths, i, tensor):
   is_not_done = (lengths > i + 1) * 1.0
-  while len(is_not_done.shape) < len(tensor.shape):  # pytype: disable=attribute-error  # numpy-scalars
+  while len(is_not_done.shape) < len(tensor.shape):
     is_not_done = jnp.expand_dims(is_not_done, -1)
   return is_not_done

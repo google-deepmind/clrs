@@ -74,8 +74,8 @@ def preprocess(dp: _DataPoint, nb_nodes: int) -> _DataPoint:
     data = dp.data.astype(jnp.float32)
     if dp.type_ == _Type.SOFT_POINTER:
       new_type = _Type.POINTER
-  dp = probing.DataPoint(  # pyrefly: ignore[missing-argument]
-      name=dp.name, location=dp.location, type_=new_type, data=data)  # pyrefly: ignore[unexpected-keyword]
+  dp = probing.DataPoint(
+      name=dp.name, location=dp.location, type_=new_type, data=data)
 
   return dp
 
@@ -88,7 +88,7 @@ def accum_adj_mat(dp: _DataPoint, adj_mat: _Array) -> _Array:
   elif dp.location == _Location.EDGE and dp.type_ == _Type.MASK:
     adj_mat += ((dp.data + jnp.transpose(dp.data, (0, 2, 1))) > 0.0)
 
-  return (adj_mat > 0.).astype('float32')  # pytype: disable=attribute-error  # numpy-scalars
+  return (adj_mat > 0.).astype('float32')
 
 
 def accum_edge_fts(encoders, dp: _DataPoint, edge_fts: _Array) -> _Array:

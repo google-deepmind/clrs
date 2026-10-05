@@ -115,7 +115,7 @@ def initialize(spec: specs.Spec) -> ProbesDict:
     probes[stage][loc][name]['type_'] = t
   # Pytype thinks initialize() returns a ProbesDict with a str for all final
   # values instead of _DataOrType.
-  return probes  # pytype: disable=bad-return-type
+  return probes
 
 
 def push(probes: ProbesDict, stage: str, next_probe):
@@ -128,7 +128,7 @@ def push(probes: ProbesDict, stage: str, next_probe):
         raise ProbeError('Attemping to push to finalized `ProbesDict`.')
       # Pytype thinks initialize() returns a ProbesDict with a str for all final
       # values instead of _DataOrType.
-      probes[stage][loc][name]['data'].append(next_probe[name])  # pytype: disable=attribute-error
+      probes[stage][loc][name]['data'].append(next_probe[name])  # pyrefly: ignore[missing-attribute]
 
 
 def finalize(probes: ProbesDict):
@@ -180,10 +180,8 @@ def split_stages(
                         'Did you forget to call `probing.finalize`?'))
 
     if t in [_Type.MASK, _Type.MASK_ONE, _Type.CATEGORICAL]:
-      # pytype: disable=attribute-error
-      if not ((data == 0) | (data == 1) | (data == -1)).all():
+      if not ((data == 0) | (data == 1) | (data == -1)).all():  # pyrefly: ignore[missing-attribute]
         raise ProbeError(f'0|1|-1 `data` for probe "{name}"')
-      # pytype: enable=attribute-error
       if t in [_Type.MASK_ONE, _Type.CATEGORICAL
               ] and not np.all(np.sum(np.abs(data), -1) == 1):
         raise ProbeError(f'Expected one-hot `data` for probe "{name}"')

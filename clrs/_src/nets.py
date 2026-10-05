@@ -161,8 +161,8 @@ class Net(hk.Module):
                                 hint_data,
                                 decoded_hint[hint.name].data)  # pyrefly: ignore[unbound-name]
         cur_hint.append(
-            probing.DataPoint(  # pyrefly: ignore[missing-argument]
-                name=hint.name, location=loc, type_=typ, data=hint_data))  # pyrefly: ignore[unexpected-keyword]
+            probing.DataPoint(
+                name=hint.name, location=loc, type_=typ, data=hint_data))
 
     hiddens, output_preds_cand, hint_preds, lstm_state = self._one_step_pred(
         inputs, cur_hint, mp_state.hiddens,
@@ -177,15 +177,15 @@ class Net(hk.Module):
         is_not_done = _is_not_done_broadcast(lengths, i,
                                              output_preds_cand[outp])
         output_preds[outp] = is_not_done * output_preds_cand[outp] + (
-            1.0 - is_not_done) * mp_state.output_preds[outp]  # pyrefly: ignore[bad-index]
+            1.0 - is_not_done) * mp_state.output_preds[outp]
 
-    new_mp_state = _MessagePassingScanState(  # pytype: disable=wrong-arg-types  # numpy-scalars
+    new_mp_state = _MessagePassingScanState(
         hint_preds=hint_preds,
         output_preds=output_preds,  # pyrefly: ignore[bad-argument-type]
         hiddens=hiddens,
         lstm_state=lstm_state)
     # Save memory by not stacking unnecessary fields
-    accum_mp_state = _MessagePassingScanState(  # pytype: disable=wrong-arg-types  # numpy-scalars
+    accum_mp_state = _MessagePassingScanState(
         hint_preds=hint_preds if return_hints else None,  # pyrefly: ignore[bad-argument-type]
         output_preds=output_preds if return_all_outputs else None,  # pyrefly: ignore[bad-argument-type]
         hiddens=hiddens if self.debug else None, lstm_state=None)  # pyrefly: ignore[bad-argument-type]
@@ -263,7 +263,7 @@ class Net(hk.Module):
       else:
         lstm_state = None
 
-      mp_state = _MessagePassingScanState(  # pytype: disable=wrong-arg-types  # numpy-scalars
+      mp_state = _MessagePassingScanState(
           hint_preds=None, output_preds=None,  # pyrefly: ignore[bad-argument-type]
           hiddens=hiddens, lstm_state=lstm_state)
 
@@ -531,8 +531,8 @@ class NetChunked(Net):
               decoded_hints[h.name].type_ == _Type.SOFT_POINTER):
             hint_data = hk.one_hot(hint_data, nb_nodes)
             typ = _Type.SOFT_POINTER
-          hints_for_pred.append(probing.DataPoint(  # pyrefly: ignore[missing-argument]
-              name=h.name, location=h.location, type_=typ,  # pyrefly: ignore[unexpected-keyword]
+          hints_for_pred.append(probing.DataPoint(
+              name=h.name, location=h.location, type_=typ,
               data=jnp.where(_expand_to(is_first | force_mask, hint_data),
                              hint_data, decoded_hints[h.name].data)))
       else:
@@ -550,10 +550,10 @@ class NetChunked(Net):
         batch_size, nb_nodes, lstm_state,
         spec, encs, decs, repred)
 
-    new_mp_state = MessagePassingStateChunked(  # pytype: disable=wrong-arg-types  # numpy-scalars
+    new_mp_state = MessagePassingStateChunked(
         hiddens=hiddens, lstm_state=lstm_state, hint_preds=hint_preds,
         inputs=nxt_inputs, hints=nxt_hints, is_first=nxt_is_first)
-    mp_output = _MessagePassingOutputChunked(  # pytype: disable=wrong-arg-types  # numpy-scalars
+    mp_output = _MessagePassingOutputChunked(
         hint_preds=hint_preds,
         output_preds=output_preds)
     return new_mp_state, mp_output
@@ -749,6 +749,6 @@ def _expand_to(x: _Array, y: _Array) -> _Array:
 
 def _is_not_done_broadcast(lengths, i, tensor):
   is_not_done = (lengths > i + 1) * 1.0
-  while len(is_not_done.shape) < len(tensor.shape):  # pytype: disable=attribute-error  # numpy-scalars
+  while len(is_not_done.shape) < len(tensor.shape):
     is_not_done = jnp.expand_dims(is_not_done, -1)
   return is_not_done

@@ -303,7 +303,7 @@ def generate_clrs_algo_dataset(
   )
 
   dataset = tf.data.Dataset.from_generator(
-      generator_fn,  # pyrefly: ignore[bad-argument-type]
+      generator_fn,
       output_signature=CLRS_SAMPLE_SPEC,
   )
 

@@ -59,8 +59,8 @@ def _without_permutation(feedback):
       outputs.append(x)
       continue
     assert x.location == specs.Location.NODE
-    outputs.append(probing.DataPoint(name=x.name, location=x.location,  # pyrefly: ignore[missing-argument, unexpected-keyword]
-                                     type_=specs.Type.POINTER, data=x.data))  # pyrefly: ignore[unexpected-keyword]
+    outputs.append(probing.DataPoint(name=x.name, location=x.location,
+                                     type_=specs.Type.POINTER, data=x.data))
   return feedback._replace(outputs=outputs)
 
 
@@ -117,26 +117,26 @@ class BaselinesTest(parameterized.TestCase):
 
       b_full = baselines.BaselineModel(
           spec, dummy_trajectory=full_batches[0], **common_args)
-      b_full.init(full_batches[0].features, seed=42)  # pytype: disable=wrong-arg-types  # jax-ndarray
+      b_full.init(full_batches[0].features, seed=42)  # pyrefly: ignore[bad-argument-type]
       full_params = b_full.params
-      full_loss_0 = b_full.feedback(rng_key, full_batches[0])  # pytype: disable=wrong-arg-types
+      full_loss_0 = b_full.feedback(rng_key, full_batches[0])  # pyrefly: ignore[bad-argument-type]
       b_full.params = full_params
-      full_loss_1 = b_full.feedback(rng_key, full_batches[1])  # pytype: disable=wrong-arg-types
+      full_loss_1 = b_full.feedback(rng_key, full_batches[1])  # pyrefly: ignore[bad-argument-type]
       new_full_params = b_full.params
 
       b_chunked = baselines.BaselineModelChunked(
           spec, dummy_trajectory=chunked_batches[0], **common_args)
-      b_chunked.init([[chunked_batches[0].features]], seed=42)  # pytype: disable=wrong-arg-types  # jax-ndarray
+      b_chunked.init([[chunked_batches[0].features]], seed=42)  # pyrefly: ignore[bad-argument-type]
       chunked_params = b_chunked.params
       jax.tree_util.tree_map(np.testing.assert_array_equal, full_params,
                              chunked_params)
-      chunked_loss_0 = b_chunked.feedback(rng_key, chunked_batches[0])  # pytype: disable=wrong-arg-types
+      chunked_loss_0 = b_chunked.feedback(rng_key, chunked_batches[0])  # pyrefly: ignore[bad-argument-type]
       b_chunked.params = chunked_params
-      chunked_loss_1 = b_chunked.feedback(rng_key, chunked_batches[1])  # pytype: disable=wrong-arg-types
+      chunked_loss_1 = b_chunked.feedback(rng_key, chunked_batches[1])  # pyrefly: ignore[bad-argument-type]
       new_chunked_params = b_chunked.params
 
       b_chunked.params = chunked_params
-      double_chunked_loss = b_chunked.feedback(rng_key, double_chunk_batch)  # pytype: disable=wrong-arg-types
+      double_chunked_loss = b_chunked.feedback(rng_key, double_chunk_batch)  # pyrefly: ignore[bad-argument-type]
 
     # Test that losses match
     np.testing.assert_allclose(full_loss_0, chunked_loss_0, rtol=1e-4)
@@ -181,8 +181,8 @@ class BaselinesTest(parameterized.TestCase):
           spec[0], dummy_trajectory=full_batches[0], **common_args)
       b_multi = baselines.BaselineModel(
           spec, dummy_trajectory=full_batches, **common_args)
-      b_single.init(full_batches[0].features, seed=0)  # pytype: disable=wrong-arg-types  # jax-ndarray
-      b_multi.init([f.features for f in full_batches], seed=0)  # pytype: disable=wrong-arg-types  # jax-ndarray
+      b_single.init(full_batches[0].features, seed=0)  # pyrefly: ignore[bad-argument-type]
+      b_multi.init([f.features for f in full_batches], seed=0)  # pyrefly: ignore[bad-argument-type]
 
       single_params = []
       single_losses = []
@@ -190,16 +190,16 @@ class BaselinesTest(parameterized.TestCase):
       multi_losses = []
 
       single_params.append(copy.deepcopy(b_single.params))
-      single_losses.append(b_single.feedback(rng_key, full_batches[0]))  # pytype: disable=wrong-arg-types
+      single_losses.append(b_single.feedback(rng_key, full_batches[0]))  # pyrefly: ignore[bad-argument-type]
       single_params.append(copy.deepcopy(b_single.params))
-      single_losses.append(b_single.feedback(rng_key, full_batches_2[0]))  # pytype: disable=wrong-arg-types
+      single_losses.append(b_single.feedback(rng_key, full_batches_2[0]))  # pyrefly: ignore[bad-argument-type]
       single_params.append(copy.deepcopy(b_single.params))
 
       multi_params.append(copy.deepcopy(b_multi.params))
-      multi_losses.append(b_multi.feedback(rng_key, full_batches[0],  # pytype: disable=wrong-arg-types
+      multi_losses.append(b_multi.feedback(rng_key, full_batches[0],  # pyrefly: ignore[bad-argument-type]
                                            algorithm_index=0))
       multi_params.append(copy.deepcopy(b_multi.params))
-      multi_losses.append(b_multi.feedback(rng_key, full_batches_2[0],  # pytype: disable=wrong-arg-types
+      multi_losses.append(b_multi.feedback(rng_key, full_batches_2[0],  # pyrefly: ignore[bad-argument-type]
                                            algorithm_index=0))
       multi_params.append(copy.deepcopy(b_multi.params))
 
@@ -251,11 +251,11 @@ class BaselinesTest(parameterized.TestCase):
     if is_chunked:
       baseline = baselines.BaselineModelChunked(
           spec, dummy_trajectory=batches, **common_args)
-      baseline.init([[f.features for f in batches]], seed=0)  # pytype: disable=wrong-arg-types  # jax-ndarray
+      baseline.init([[f.features for f in batches]], seed=0)  # pyrefly: ignore[bad-argument-type]
     else:
       baseline = baselines.BaselineModel(
           spec, dummy_trajectory=batches, **common_args)
-      baseline.init([f.features for f in batches], seed=0)  # pytype: disable=wrong-arg-types  # jax-ndarray
+      baseline.init([f.features for f in batches], seed=0)  # pyrefly: ignore[bad-argument-type]
 
     # Find out what parameters change when we train each algorithm
     def _change(x, y):
@@ -270,7 +270,7 @@ class BaselinesTest(parameterized.TestCase):
     param_changes = []
     for algo_idx in range(len(algos)):
       init_params = copy.deepcopy(baseline.params)
-      _ = baseline.feedback(  # pytype: disable=wrong-arg-types
+      _ = baseline.feedback(
           rng_key,  # pyrefly: ignore[bad-argument-type]
           batches[algo_idx],
           algorithm_index=(0, algo_idx) if is_chunked else algo_idx)
