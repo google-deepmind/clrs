@@ -177,7 +177,7 @@ class Net(hk.Module):
         is_not_done = _is_not_done_broadcast(lengths, i,
                                              output_preds_cand[outp])
         output_preds[outp] = is_not_done * output_preds_cand[outp] + (
-            1.0 - is_not_done) * mp_state.output_preds[outp]
+            1.0 - is_not_done) * mp_state.output_preds[outp]  # pyrefly: ignore[bad-index]
 
     new_mp_state = _MessagePassingScanState(
         hint_preds=hint_preds,
@@ -501,7 +501,7 @@ class NetChunked(Net):
     is_first = mp_state.is_first
     hints = mp_state.hints
     if init_mp_state:
-      prev_hint_preds = {h.name: _as_prediction_data(h) for h in hints}  # pyrefly: ignore[not-iterable]
+      prev_hint_preds = {h.name: _as_prediction_data(h) for h in hints}  # pyrefly: ignore[missing-attribute, not-iterable]
       hints_for_pred = hints
     else:
       prev_hint_preds = mp_state.hint_preds
@@ -525,16 +525,16 @@ class NetChunked(Net):
                                              hard=hard_postprocess)
         hints_for_pred = []
         for h in hints:  # pyrefly: ignore[not-iterable]
-          typ = h.type_
-          hint_data = h.data
+          typ = h.type_  # pyrefly: ignore[missing-attribute]
+          hint_data = h.data  # pyrefly: ignore[missing-attribute]
           if (typ == _Type.POINTER and
-              decoded_hints[h.name].type_ == _Type.SOFT_POINTER):
+              decoded_hints[h.name].type_ == _Type.SOFT_POINTER):  # pyrefly: ignore[missing-attribute]
             hint_data = hk.one_hot(hint_data, nb_nodes)
             typ = _Type.SOFT_POINTER
           hints_for_pred.append(probing.DataPoint(
-              name=h.name, location=h.location, type_=typ,
+              name=h.name, location=h.location, type_=typ,  # pyrefly: ignore[missing-attribute]
               data=jnp.where(_expand_to(is_first | force_mask, hint_data),
-                             hint_data, decoded_hints[h.name].data)))
+                             hint_data, decoded_hints[h.name].data)))  # pyrefly: ignore[missing-attribute]
       else:
         hints_for_pred = hints
 

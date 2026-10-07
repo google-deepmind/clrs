@@ -516,7 +516,7 @@ def main(unused_argv):
         # In non-chunked training, all training lengths can be treated equally,
         # since there is no state to maintain between batches.
         length_and_algo_idx = algo_idx
-      cur_loss = train_model.feedback(rng_key, feedback, length_and_algo_idx)
+      cur_loss = train_model.feedback(rng_key, feedback, length_and_algo_idx)  # pyrefly: ignore[bad-argument-type]
       rng_key = new_rng_key
 
       if FLAGS.chunked_training:
