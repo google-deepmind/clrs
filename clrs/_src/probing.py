@@ -51,7 +51,7 @@ def _convert_to_str(element):
   if isinstance(element, tf.Tensor):
     return element.numpy().decode('utf-8')
   elif isinstance(element, (np.ndarray, bytes)):
-    return element.decode('utf-8')
+    return element.decode('utf-8')  # pyrefly: ignore[missing-attribute]
   else:
     return element
 
@@ -93,7 +93,7 @@ class DataPoint:
   def tree_unflatten(cls, meta, data):
     name, location, type_ = meta
     subdata, = data
-    return DataPoint(name, location, type_, subdata)
+    return DataPoint(name, location, type_, subdata)  # pyrefly: ignore[bad-argument-count]
 
 
 class ProbeError(Exception):
@@ -115,7 +115,7 @@ def initialize(spec: specs.Spec) -> ProbesDict:
     probes[stage][loc][name]['type_'] = t
   # Pytype thinks initialize() returns a ProbesDict with a str for all final
   # values instead of _DataOrType.
-  return probes  # pytype: disable=bad-return-type
+  return probes
 
 
 def push(probes: ProbesDict, stage: str, next_probe):
@@ -128,7 +128,7 @@ def push(probes: ProbesDict, stage: str, next_probe):
         raise ProbeError('Attemping to push to finalized `ProbesDict`.')
       # Pytype thinks initialize() returns a ProbesDict with a str for all final
       # values instead of _DataOrType.
-      probes[stage][loc][name]['data'].append(next_probe[name])  # pytype: disable=attribute-error
+      probes[stage][loc][name]['data'].append(next_probe[name])  # pyrefly: ignore[missing-attribute]
 
 
 def finalize(probes: ProbesDict):
@@ -140,7 +140,7 @@ def finalize(probes: ProbesDict):
           raise ProbeError('Attemping to re-finalize a finalized `ProbesDict`.')
         if stage == _Stage.HINT:
           # Hints are provided for each timestep. Stack them here.
-          probes[stage][loc][name]['data'] = np.stack(
+          probes[stage][loc][name]['data'] = np.stack(  # pyrefly: ignore[no-matching-overload]
               probes[stage][loc][name]['data'])
         else:
           # Only one instance of input/output exist. Remove leading axis.
@@ -180,17 +180,15 @@ def split_stages(
                         'Did you forget to call `probing.finalize`?'))
 
     if t in [_Type.MASK, _Type.MASK_ONE, _Type.CATEGORICAL]:
-      # pytype: disable=attribute-error
-      if not ((data == 0) | (data == 1) | (data == -1)).all():
+      if not ((data == 0) | (data == 1) | (data == -1)).all():  # pyrefly: ignore[missing-attribute]
         raise ProbeError(f'0|1|-1 `data` for probe "{name}"')
-      # pytype: enable=attribute-error
       if t in [_Type.MASK_ONE, _Type.CATEGORICAL
               ] and not np.all(np.sum(np.abs(data), -1) == 1):
         raise ProbeError(f'Expected one-hot `data` for probe "{name}"')
 
     dim_to_expand = 1 if stage == _Stage.HINT else 0
-    data_point = DataPoint(name=name, location=loc, type_=t,
-                           data=np.expand_dims(data, dim_to_expand))
+    data_point = DataPoint(name=name, location=loc, type_=t,  # pyrefly: ignore[unexpected-keyword]
+                           data=np.expand_dims(data, dim_to_expand))  # pyrefly: ignore[unexpected-keyword]
 
     if stage == _Stage.INPUT:
       inputs.append(data_point)

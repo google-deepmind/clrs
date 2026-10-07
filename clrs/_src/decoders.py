@@ -190,7 +190,7 @@ def postprocess(spec: _Spec, preds: Dict[str, _Array],
     else:
       raise ValueError("Invalid type")
     result[name] = probing.DataPoint(
-        name=name, location=loc, type_=new_t, data=data)
+        name=name, location=loc, type_=new_t, data=data)  # pyrefly: ignore[bad-argument-type]
 
   return result
 

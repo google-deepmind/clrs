@@ -51,13 +51,14 @@ _Trajectory = samplers.Trajectory
 _Type = specs.Type
 _OutputClass = specs.OutputClass
 
-# pytype: disable=signature-mismatch
-
 
 def _maybe_pick_first_pmapped(tree):
   if jax.local_device_count() == 1:
     return tree
-  return jax.tree_util.tree_map(lambda x: x[0], tree)
+  # Avoid degraded performance under the new jax.pmap.
+  return jax.tree_util.tree_map(
+      lambda x: x.addressable_shards[0].data.squeeze(0), tree
+  )
 
 
 @jax.jit
@@ -122,15 +123,27 @@ def _maybe_put_replicated(tree):
   if jax.local_device_count() == 1:
     return jax.device_put(tree)
   else:
-    return jax.device_put_replicated(tree, jax.local_devices())
+    devices = jax.local_devices()
+    mesh = jax.sharding.Mesh(np.array(devices), ('_device_put_sharded',))
+    sharding = jax.NamedSharding(mesh, jax.P('_device_put_sharded'))
+
+    def _replicate(x):
+      if isinstance(x, jax.Array):
+        return jax.device_put(jnp.stack([x] * len(devices)), sharding)
+      return jax.device_put(np.stack([x] * len(devices)), sharding)
+
+    return jax.tree_util.tree_map(_replicate, tree)
 
 
 def _maybe_pmap_rng_key(rng_key: _Array):
   n_devices = jax.local_device_count()
   if n_devices == 1:
     return rng_key
+  devices = jax.local_devices()
   pmap_rng_keys = jax.random.split(rng_key, n_devices)
-  return jax.device_put_sharded(list(pmap_rng_keys), jax.local_devices())
+  mesh = jax.sharding.Mesh(np.array(devices), ('_device_put_sharded',))
+  sharding = jax.NamedSharding(mesh, jax.P('_device_put_sharded'))
+  return jax.device_put(jnp.stack(list(pmap_rng_keys)), sharding)
 
 
 class BaselineModel(model.Model):
@@ -155,6 +168,7 @@ class BaselineModel(model.Model):
       hint_repred_mode: str = 'soft',
       name: str = 'base_model',
       nb_msg_passing_steps: int = 1,
+      debug: bool = False,
   ):
     """Constructor for BaselineModel.
 
@@ -199,6 +213,7 @@ class BaselineModel(model.Model):
           - 'hard_on_eval', which is soft for training and hard for evaluation.
       name: Model name.
       nb_msg_passing_steps: Number of message passing steps per hint.
+      debug: If True, the model run in debug mode, outputting all hidden state.
 
     Raises:
       ValueError: if `encode_hints=True` and `decode_hints=False`.
@@ -223,6 +238,7 @@ class BaselineModel(model.Model):
       self.opt = optax.adam(learning_rate)
 
     self.nb_msg_passing_steps = nb_msg_passing_steps
+    self.debug = debug
 
     self.nb_dims = []
     if isinstance(dummy_trajectory, _Feedback):
@@ -253,7 +269,8 @@ class BaselineModel(model.Model):
                       processor_factory, use_lstm, encoder_init,
                       dropout_prob, hint_teacher_forcing,
                       hint_repred_mode,
-                      self.nb_dims, self.nb_msg_passing_steps)(*args, **kwargs)
+                      self.nb_dims, self.nb_msg_passing_steps,
+                      self.debug)(*args, **kwargs)
 
     self.net_fn = hk.transform(_use_net)
     pmap_args = dict(axis_name='batch', devices=jax.local_devices())
@@ -264,21 +281,21 @@ class BaselineModel(model.Model):
     pmean = functools.partial(jax.lax.pmean, axis_name='batch')
     self._maybe_pmean = pmean if n_devices > 1 else lambda x: x
     extra_args[static_arg] = 3
-    self.jitted_grad = func(self._compute_grad, **extra_args)
+    self.jitted_grad = func(self._compute_grad, **extra_args)  # pyrefly: ignore[bad-argument-type]
     extra_args[static_arg] = 4
     self.jitted_feedback = func(self._feedback, donate_argnums=[0, 3],
-                                **extra_args)
+                                **extra_args)  # pyrefly: ignore[bad-argument-type]
     extra_args[static_arg] = [3, 4, 5]
-    self.jitted_predict = func(self._predict, **extra_args)
+    self.jitted_predict = func(self._predict, **extra_args)  # pyrefly: ignore[bad-argument-type]
     extra_args[static_arg] = [3, 4]
     self.jitted_accum_opt_update = func(accum_opt_update, donate_argnums=[0, 2],
-                                        **extra_args)
+                                        **extra_args)  # pyrefly: ignore[bad-argument-type]
 
   def init(self, features: Union[_Features, List[_Features]], seed: _Seed):
     if not isinstance(features, list):
       assert len(self._spec) == 1
       features = [features]
-    self.params = self.net_fn.init(jax.random.PRNGKey(seed), features, True,  # pytype: disable=wrong-arg-types  # jax-ndarray
+    self.params = self.net_fn.init(jax.random.PRNGKey(seed), features, True,
                                    algorithm_index=-1,
                                    return_hints=False,
                                    return_all_outputs=False)
@@ -324,18 +341,25 @@ class BaselineModel(model.Model):
   def _predict(self, params, rng_key: hk.PRNGSequence, features: _Features,
                algorithm_index: int, return_hints: bool,
                return_all_outputs: bool):
-    outs, hint_preds = self.net_fn.apply(
+    net_outputs = self.net_fn.apply(
         params, rng_key, [features],
         repred=True, algorithm_index=algorithm_index,
         return_hints=return_hints,
         return_all_outputs=return_all_outputs)
+    if self.debug:
+      outs, hint_preds, hidden_states = net_outputs
+    else:
+      outs, hint_preds = net_outputs
     outs = decoders.postprocess(self._spec[algorithm_index],
                                 outs,
                                 sinkhorn_temperature=0.1,
                                 sinkhorn_steps=50,
                                 hard=True,
                                 )
-    return outs, hint_preds
+    if self.debug:
+      return outs, hint_preds, hidden_states  # pyrefly: ignore[unbound-name]
+    else:
+      return outs, hint_preds
 
   def compute_grad(
       self,
@@ -351,7 +375,7 @@ class BaselineModel(model.Model):
     assert algorithm_index >= 0
 
     # Calculate gradients.
-    rng_keys = _maybe_pmap_rng_key(rng_key)  # pytype: disable=wrong-arg-types  # numpy-scalars
+    rng_keys = _maybe_pmap_rng_key(rng_key)  # pyrefly: ignore[bad-argument-type]
     feedback = _maybe_pmap_data(feedback)
     loss, grads = self.jitted_grad(
         self._device_params, rng_keys, feedback, algorithm_index)
@@ -360,13 +384,13 @@ class BaselineModel(model.Model):
 
     return  loss, grads
 
-  def feedback(self, rng_key: hk.PRNGSequence, feedback: _Feedback,
+  def feedback(self, rng_key: hk.PRNGSequence, feedback: _Feedback,  # pyrefly: ignore[bad-override]
                algorithm_index=None) -> float:
     if algorithm_index is None:
       assert len(self._spec) == 1
       algorithm_index = 0
     # Calculate and apply gradients.
-    rng_keys = _maybe_pmap_rng_key(rng_key)  # pytype: disable=wrong-arg-types  # numpy-scalars
+    rng_keys = _maybe_pmap_rng_key(rng_key)  # pyrefly: ignore[bad-argument-type]
     feedback = _maybe_pmap_data(feedback)
     loss, self._device_params, self._device_opt_state = self.jitted_feedback(
         self._device_params, rng_keys, feedback,
@@ -374,7 +398,7 @@ class BaselineModel(model.Model):
     loss = _maybe_pick_first_pmapped(loss)
     return loss
 
-  def predict(self, rng_key: hk.PRNGSequence, features: _Features,
+  def predict(self, rng_key: hk.PRNGSequence, features: _Features,  # pyrefly: ignore[bad-override]
               algorithm_index: Optional[int] = None,
               return_hints: bool = False,
               return_all_outputs: bool = False):
@@ -383,7 +407,7 @@ class BaselineModel(model.Model):
       assert len(self._spec) == 1
       algorithm_index = 0
 
-    rng_keys = _maybe_pmap_rng_key(rng_key)  # pytype: disable=wrong-arg-types  # numpy-scalars
+    rng_keys = _maybe_pmap_rng_key(rng_key)  # pyrefly: ignore[bad-argument-type]
     features = _maybe_pmap_data(features)
     return _maybe_restack_from_pmap(
         self.jitted_predict(
@@ -394,12 +418,16 @@ class BaselineModel(model.Model):
 
   def _loss(self, params, rng_key, feedback, algorithm_index):
     """Calculates model loss f(feedback; params)."""
-    output_preds, hint_preds = self.net_fn.apply(
+    outputs = self.net_fn.apply(
         params, rng_key, [feedback.features],
         repred=False,
         algorithm_index=algorithm_index,
         return_hints=True,
         return_all_outputs=False)
+    if self.debug:
+      output_preds, hint_preds, _ = outputs
+    else:
+      output_preds, hint_preds = outputs
 
     nb_nodes = _nb_nodes(feedback, is_chunked=False)
     lengths = feedback.features.lengths
@@ -434,7 +462,7 @@ class BaselineModel(model.Model):
       assert len(params) > len(params_subset)
       assert params_subset
       new_params = optax.apply_updates(params_subset, updates_subset)
-      new_params = hk.data_structures.merge(params, new_params)
+      new_params = hk.data_structures.merge(params, new_params)  # pyrefly: ignore[bad-argument-type]
     else:
       new_params = optax.apply_updates(params, updates)
 
@@ -524,20 +552,20 @@ class BaselineModelChunked(BaselineModel):
     pmean = functools.partial(jax.lax.pmean, axis_name='batch')
     self._maybe_pmean = pmean if n_devices > 1 else lambda x: x
     extra_args[static_arg] = 4
-    self.jitted_grad = func(self._compute_grad, **extra_args)
+    self.jitted_grad = func(self._compute_grad, **extra_args)  # pyrefly: ignore[bad-argument-type]
     extra_args[static_arg] = 5
     self.jitted_feedback = func(self._feedback, donate_argnums=[0, 4],
-                                **extra_args)
+                                **extra_args)  # pyrefly: ignore[bad-argument-type]
     extra_args[static_arg] = [3, 4]
     self.jitted_accum_opt_update = func(accum_opt_update, donate_argnums=[0, 2],
-                                        **extra_args)
+                                        **extra_args)  # pyrefly: ignore[bad-argument-type]
 
   def _init_mp_state(self, features_list: List[List[_FeaturesChunked]],
                      rng_key: _Array):
     def _empty_mp_state():
-      return nets.MessagePassingStateChunked(  # pytype: disable=wrong-arg-types  # numpy-scalars
-          inputs=None, hints=None, is_first=None,
-          hint_preds=None, hiddens=None, lstm_state=None)
+      return nets.MessagePassingStateChunked(
+          inputs=None, hints=None, is_first=None,  # pyrefly: ignore[bad-argument-type]
+          hint_preds=None, hiddens=None, lstm_state=None)  # pyrefly: ignore[bad-argument-type]
     empty_mp_states = [[_empty_mp_state() for _ in f] for f in features_list]
     dummy_params = [self.net_fn.init(rng_key, f, e, False,
                                      init_mp_state=True, algorithm_index=-1)
@@ -548,26 +576,26 @@ class BaselineModelChunked(BaselineModel):
         for (d, f, e) in zip(dummy_params, features_list, empty_mp_states)]
     return mp_states
 
-  def init(self,
+  def init(self,  # pyrefly: ignore[bad-override]
            features: List[List[_FeaturesChunked]],
            seed: _Seed):
     self.mp_states = self._init_mp_state(features,
-                                         jax.random.PRNGKey(seed))  # pytype: disable=wrong-arg-types  # jax-ndarray
+                                         jax.random.PRNGKey(seed))
     self.init_mp_states = [list(x) for x in self.mp_states]
     self.params = self.net_fn.init(
-        jax.random.PRNGKey(seed), features[0], self.mp_states[0],  # pytype: disable=wrong-arg-types  # jax-ndarray
+        jax.random.PRNGKey(seed), features[0], self.mp_states[0],
         True, init_mp_state=False, algorithm_index=-1)
     self.opt_state = self.opt.init(self.params)
     # We will use the optimizer state skeleton for traversal when we
     # want to avoid updating the state of params of untrained algorithms.
     self.opt_state_skeleton = self.opt.init(jnp.zeros(1))
 
-  def predict(self, rng_key: hk.PRNGSequence, features: _FeaturesChunked,
+  def predict(self, rng_key: hk.PRNGSequence, features: _FeaturesChunked,  # pyrefly: ignore[bad-override]
               algorithm_index: Optional[int] = None):
     """Inference not implemented. Chunked model intended for training only."""
     raise NotImplementedError
 
-  def _loss(self, params, rng_key, feedback, mp_state, algorithm_index):
+  def _loss(self, params, rng_key, feedback, mp_state, algorithm_index):  # pyrefly: ignore[bad-override]
     (output_preds, hint_preds), mp_state = self.net_fn.apply(
         params, rng_key, [feedback.features],
         [mp_state],
@@ -603,12 +631,12 @@ class BaselineModelChunked(BaselineModel):
 
     return total_loss, (mp_state,)
 
-  def _compute_grad(self, params, rng_key, feedback, mp_state, algorithm_index):
+  def _compute_grad(self, params, rng_key, feedback, mp_state, algorithm_index):  # pyrefly: ignore[bad-override]
     (lss, (mp_state,)), grads = jax.value_and_grad(self._loss, has_aux=True)(
         params, rng_key, feedback, mp_state, algorithm_index)
     return self._maybe_pmean(lss), mp_state, self._maybe_pmean(grads)
 
-  def _feedback(self, params, rng_key, feedback, mp_state, opt_state,
+  def _feedback(self, params, rng_key, feedback, mp_state, opt_state,  # pyrefly: ignore[bad-override]
                 algorithm_index):
     (lss, (mp_state,)), grads = jax.value_and_grad(self._loss, has_aux=True)(
         params, rng_key, feedback, mp_state, algorithm_index)
@@ -618,7 +646,7 @@ class BaselineModelChunked(BaselineModel):
     lss = self._maybe_pmean(lss)
     return lss, params, opt_state, mp_state
 
-  def compute_grad(
+  def compute_grad(  # pyrefly: ignore[bad-override]
       self,
       rng_key: hk.PRNGSequence,
       feedback: _Feedback,
@@ -629,12 +657,12 @@ class BaselineModelChunked(BaselineModel):
     if algorithm_index is None:
       assert len(self._spec) == 1
       algorithm_index = (0, 0)
-    length_index, algorithm_index = algorithm_index
+    length_index, algorithm_index = algorithm_index  # pyrefly: ignore[bad-assignment]
     # Reusing init_mp_state improves performance.
     # The next, commented out line, should be used for proper state keeping.
     # mp_state = self.mp_states[length_index][algorithm_index]
-    mp_state = self.init_mp_states[length_index][algorithm_index]
-    rng_keys = _maybe_pmap_rng_key(rng_key)  # pytype: disable=wrong-arg-types  # numpy-scalars
+    mp_state = self.init_mp_states[length_index][algorithm_index]  # pyrefly: ignore[bad-index]
+    rng_keys = _maybe_pmap_rng_key(rng_key)  # pyrefly: ignore[bad-argument-type]
     feedback = _maybe_pmap_reshape(feedback, split_axis=1)
     mp_state = _maybe_pmap_reshape(mp_state, split_axis=0)
 
@@ -643,7 +671,7 @@ class BaselineModelChunked(BaselineModel):
     loss = _maybe_pick_first_pmapped(loss)
     grads = _maybe_pick_first_pmapped(grads)
     mp_state = _maybe_restack_from_pmap(mp_state)
-    self.mp_states[length_index][algorithm_index] = mp_state
+    self.mp_states[length_index][algorithm_index] = mp_state  # pyrefly: ignore[unsupported-operation]
     return loss, grads
 
   def feedback(self, rng_key: hk.PRNGSequence, feedback: _Feedback,
@@ -656,7 +684,7 @@ class BaselineModelChunked(BaselineModel):
     # The next, commented out line, should be used for proper state keeping.
     # mp_state = self.mp_states[length_index][algorithm_index]
     mp_state = self.init_mp_states[length_index][algorithm_index]
-    rng_keys = _maybe_pmap_rng_key(rng_key)  # pytype: disable=wrong-arg-types  # numpy-scalars
+    rng_keys = _maybe_pmap_rng_key(rng_key)  # pyrefly: ignore[bad-argument-type]
     feedback = _maybe_pmap_reshape(feedback, split_axis=1)
     mp_state = _maybe_pmap_reshape(mp_state, split_axis=0)
     loss, self._device_params, self._device_opt_state, mp_state = (
@@ -715,7 +743,7 @@ def accum_opt_update(params, grads, opt_state, opt, freeze_processor):
     assert params_subset
     updates_subset = _filter_out_processor(updates)
     new_params = optax.apply_updates(params_subset, updates_subset)
-    new_params = hk.data_structures.merge(params, new_params)
+    new_params = hk.data_structures.merge(params, new_params)  # pyrefly: ignore[bad-argument-type]
   else:
     new_params = optax.apply_updates(params, updates)
 
@@ -766,9 +794,19 @@ def filter_null_grads(grads, opt, opt_state, opt_state_skeleton, algo_idx):
     masked_grads = grads
   else:
     masked_grads = {k: _keep_in_algo(k, v) for k, v in grads.items()}
-  flat_grads, treedef = jax.tree_util.tree_flatten(masked_grads)
+
+  flat_grads_with_none, treedef = jax.tree_util.tree_flatten(
+      masked_grads, is_leaf=lambda x: x is None
+  )
+  null_mask = [g is None for g in flat_grads_with_none]
+  flat_grads_all, _ = jax.tree_util.tree_flatten(grads)
+  flat_grads = [
+      flat_grads_all[i] if null_mask[i] else flat_grads_with_none[i]
+      for i in range(len(flat_grads_with_none))
+  ]
+
   flat_opt_state = jax.tree_util.tree_map(
-      lambda _, x: x  # pylint:disable=g-long-lambda
+      lambda _, x: x
       if isinstance(x, (np.ndarray, jax.Array))
       else treedef.flatten_up_to(x),
       opt_state_skeleton,
@@ -778,17 +816,38 @@ def filter_null_grads(grads, opt, opt_state, opt_state_skeleton, algo_idx):
   # Compute updates only for the params with gradient.
   flat_updates, flat_opt_state = opt_update(opt, flat_grads, flat_opt_state)
 
+  flat_updates = [
+      None if null_mask[i] else flat_updates[i]
+      for i in range(len(flat_updates))
+  ]
+  flat_opt_state = jax.tree_util.tree_map(
+      lambda x: x
+      if isinstance(x, (np.ndarray, jax.Array))
+      else [None if null_mask[i] else x[i] for i in range(len(x))],
+      flat_opt_state,
+      is_leaf=lambda x: isinstance(x, (np.ndarray, jax.Array)),
+  )
+
   def unflatten(flat, original):
     """Restore tree structure, filling missing (None) leaves with original."""
+
     if isinstance(flat, (np.ndarray, jax.Array)):
       return flat
-    return jax.tree_util.tree_map(lambda x, y: x if y is None else y, original,
-                                  treedef.unflatten(flat))
+    return jax.tree_util.tree_map(
+        lambda x, y: x if y is None else y,
+        original,
+        treedef.unflatten(flat),
+        is_leaf=lambda x: x is None,
+    )
 
   # Restore the state and updates tree structure.
-  new_opt_state = jax.tree_util.tree_map(lambda _, x, y: unflatten(x, y),
-                                         opt_state_skeleton, flat_opt_state,
-                                         opt_state)
-  updates = unflatten(flat_updates,
-                      jax.tree_util.tree_map(lambda x: 0., grads))
+  new_opt_state = jax.tree_util.tree_map(
+      lambda _, x, y: unflatten(x, y),
+      opt_state_skeleton,
+      flat_opt_state,
+      opt_state,
+  )
+  updates = unflatten(
+      flat_updates, jax.tree_util.tree_map(lambda x: 0.0, grads)
+  )
   return updates, new_opt_state
