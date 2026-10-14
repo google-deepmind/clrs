@@ -15,12 +15,11 @@
 
 """The CLRS Algorithmic Reasoning Benchmark."""
 
-from clrs import models
+from typing import Any
+import importlib
 
 from clrs._src import algorithms
 from clrs._src import clrs_text
-from clrs._src import decoders
-from clrs._src import processors
 from clrs._src import specs
 
 from clrs._src.dataset import chunkify
@@ -38,7 +37,43 @@ from clrs._src.model import Model
 from clrs._src.probing import DataPoint
 from clrs._src.probing import predecessor_to_cyclic_predecessor_and_first
 
-from clrs._src.processors import get_processor_factory
+_LAZY_MODULES = {
+    "models": "clrs.models",
+    "decoders": "clrs._src.decoders",
+    "processors": "clrs._src.processors",
+}
+
+_LAZY_ATTRS = {
+    "get_processor_factory": ("clrs._src.processors", "get_processor_factory"),
+}
+
+
+def __getattr__(name: str) -> Any:
+  if name in _LAZY_MODULES:
+    try:
+      module = importlib.import_module(_LAZY_MODULES[name])
+      globals()[name] = module
+      return module
+    except (ImportError, ModuleNotFoundError) as err:
+      raise ImportError(
+          f"To use `clrs.{name}`, please install model dependencies (e.g. dm-haiku, chex): {err}"
+      ) from err
+  if name in _LAZY_ATTRS:
+    module_name, attr_name = _LAZY_ATTRS[name]
+    try:
+      module = importlib.import_module(module_name)
+      attr = getattr(module, attr_name)
+      globals()[name] = attr
+      return attr
+    except (ImportError, ModuleNotFoundError) as err:
+      raise ImportError(
+          f"To use `clrs.{name}`, please install model dependencies (e.g. dm-haiku, chex): {err}"
+      ) from err
+  raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__():
+  return sorted(list(globals().keys()) + list(_LAZY_MODULES.keys()) + list(_LAZY_ATTRS.keys()))
 
 from clrs._src.samplers import build_sampler
 from clrs._src.samplers import CLRS30
