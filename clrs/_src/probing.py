@@ -31,7 +31,10 @@ from clrs._src import specs
 import jax
 import jax.numpy as jnp
 import numpy as np
-import tensorflow as tf
+try:
+  import tensorflow as tf
+except (ImportError, ModuleNotFoundError):
+  tf = None
 
 
 _Location = specs.Location
@@ -48,7 +51,7 @@ ProbesDict = Dict[
 
 
 def _convert_to_str(element):
-  if isinstance(element, tf.Tensor):
+  if tf is not None and isinstance(element, tf.Tensor):
     return element.numpy().decode('utf-8')
   elif isinstance(element, (np.ndarray, bytes)):
     return element.decode('utf-8')  # pyrefly: ignore[missing-attribute]
